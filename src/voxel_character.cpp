@@ -819,6 +819,87 @@ VoxelizedCharacter::detach_component_near(
     return detached;
 }
 
+std::optional<DetachedVoxelComponent>
+VoxelizedCharacter::detach_distal_region(
+    const CharacterMeshFrame& animated_mesh,
+    const Vec3& cut_center,
+    const Vec3& outward_normal,
+    const Vec3& seed_world_point,
+    double selection_radius,
+    double minimum_axial_offset,
+    std::size_t minimum_voxels) {
+
+    if (selection_radius <= 0.0
+        || minimum_axial_offset < 0.0
+        || minimum_voxels == 0) {
+        throw std::invalid_argument(
+            "invalid distal voxel detachment parameters");
+    }
+
+    const Vec3 axis =
+        normalized(outward_normal);
+
+    if (length_squared(axis) <= 1e-12) {
+        throw std::invalid_argument(
+            "distal voxel detachment normal must be non-zero");
+    }
+
+    const double radius_squared =
+        selection_radius * selection_radius;
+
+    DetachedVoxelComponent detached;
+
+    for (std::size_t i = 0;
+         i < voxels_.size();
+         ++i) {
+
+        const CharacterVoxel& voxel =
+            voxels_[i];
+
+        if (voxel.state
+            != CharacterVoxelState::Attached) {
+            continue;
+        }
+
+        const Vec3 position =
+            current_center(
+                voxel,
+                animated_mesh);
+
+        const double axial =
+            dot(
+                position - cut_center,
+                axis);
+
+        if (axial
+            <= minimum_axial_offset) {
+            continue;
+        }
+
+        if (length_squared(
+                position
+                - seed_world_point)
+            > radius_squared) {
+            continue;
+        }
+
+        detached.voxel_indices.push_back(i);
+    }
+
+    if (detached.voxel_indices.size()
+        < minimum_voxels) {
+        return std::nullopt;
+    }
+
+    for (const std::size_t index
+         : detached.voxel_indices) {
+        voxels_[index].state =
+            CharacterVoxelState::Detached;
+    }
+
+    return detached;
+}
+
 Vec3 VoxelizedCharacter::voxel_center(
     std::size_t voxel_index,
     const CharacterMeshFrame& animated_mesh) const {
