@@ -183,7 +183,9 @@ jobs:
             --require-detachment \
             --require-ground-contact \
             --require-walk-invalidation \
-            --require-anatomical-isolation | tee build/character_voxel_thigh.log
+            --require-anatomical-isolation \
+            --require-stable-camera \
+            --require-articulated-leg | tee build/character_voxel_thigh.log
 
       - name: Encode MP4s
         run: |
