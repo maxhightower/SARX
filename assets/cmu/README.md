@@ -62,3 +62,5 @@ mapped node names successfully but could rotate the entire target hierarchy
 sideways/upside-down while still passing structural tests. The media gate now
 also requires an upright head-over-pelvis relationship and sustained intact-foot
 support after the authored transition.
+
+The authored CMU hip/root rotation is intentionally not transferred; SARX preserves the agent's existing world-facing direction across the injury-motion handoff.
