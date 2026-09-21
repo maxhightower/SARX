@@ -529,14 +529,14 @@ int main(int argc, char** argv) {
             center.y,
             center.z
         };
-        // The Quaternius fixture faces +Z. Render it from the side
-        // so translational travel follows the direction it faces.
+        // Keep locomotion aligned with +Z while returning the
+        // evidence camera to the original three-quarter corner view.
         camera.position =
             camera.target
             + sarx::Vec3{
-                scale * 4.9,
+                scale * 2.25,
                 scale * 0.45,
-                0.0
+                scale * 4.9
             };
         camera.vertical_fov_degrees = 34.0;
         camera.width = 960;
