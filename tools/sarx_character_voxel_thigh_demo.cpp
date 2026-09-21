@@ -1,5 +1,5 @@
-#include "sarx/body.hpp"
 #include "sarx/character_render.hpp"
+#include "sarx/detached_articulation.hpp"
 #include "sarx/gltf_character.hpp"
 #include "sarx/motion_viability.hpp"
 #include "sarx/voxel_character.hpp"
@@ -277,125 +277,71 @@ sarx::CharacterMeshFrame combine(
     return out;
 }
 
-std::pair<std::size_t, std::size_t>
-farthest_pair(
-    const std::vector<sarx::Vec3>& points) {
+sarx::Vec3 farthest_used_point(
+    const sarx::CharacterMeshFrame& frame,
+    const sarx::Vec3& from) {
 
-    if (points.size() < 2) {
-        throw std::runtime_error(
-            "detached thigh component needs at least two voxels");
-    }
+    const auto used =
+        used_vertices(frame);
 
-    std::size_t a = 0;
-    std::size_t b = 1;
     double best = -1.0;
+    sarx::Vec3 result{};
 
     for (std::size_t i = 0;
-         i < points.size();
+         i < used.size();
          ++i) {
 
-        for (std::size_t j = i + 1;
-             j < points.size();
-             ++j) {
+        if (!used[i]) {
+            continue;
+        }
 
-            const double d2 =
-                sarx::length_squared(
-                    points[j] - points[i]);
+        const double distance =
+            sarx::length_squared(
+                frame.positions[i] - from);
 
-            if (d2 > best) {
-                best = d2;
-                a = i;
-                b = j;
-            }
+        if (distance > best) {
+            best = distance;
+            result = frame.positions[i];
         }
     }
 
-    return {a, b};
+    if (best < 0.0) {
+        throw std::runtime_error(
+            "could not infer distal foot endpoint");
+    }
+
+    return result;
 }
 
 struct DetachedLeg {
     sarx::DetachedVoxelComponent component;
     std::vector<sarx::Vec3> rest_centers;
-
-    sarx::Vec3 rest_a{};
-    sarx::Vec3 rest_b{};
-
-    sarx::Body motion;
-    sarx::ParticleId particle_a{};
-    sarx::ParticleId particle_b{};
-
-    std::size_t ground_contacts{};
-    bool ever_grounded{false};
-    double max_rotation_radians{};
+    std::vector<std::size_t> segment_by_voxel;
+    sarx::DetachedArticulatedChain articulation;
 };
-
-double axis_rotation(
-    const DetachedLeg& leg) {
-
-    const sarx::Vec3 rest_axis =
-        sarx::normalized(
-            leg.rest_b
-            - leg.rest_a);
-
-    const sarx::Vec3 current_axis =
-        sarx::normalized(
-            leg.motion
-                .particles()[leg.particle_b]
-                .position
-            - leg.motion
-                .particles()[leg.particle_a]
-                .position);
-
-    if (sarx::length_squared(rest_axis)
-            <= 1e-12
-        || sarx::length_squared(current_axis)
-            <= 1e-12) {
-        return 0.0;
-    }
-
-    return std::acos(
-        std::clamp(
-            sarx::dot(
-                rest_axis,
-                current_axis),
-            -1.0,
-            1.0));
-}
 
 std::vector<sarx::Vec3>
 detached_world_centers(
     const DetachedLeg& leg) {
 
-    const sarx::Vec3 current_a =
-        leg.motion
-            .particles()[leg.particle_a]
-            .position;
-
-    const sarx::Vec3 current_b =
-        leg.motion
-            .particles()[leg.particle_b]
-            .position;
-
-    const sarx::Vec3 rest_axis =
-        leg.rest_b - leg.rest_a;
-
-    const sarx::Vec3 current_axis =
-        current_b - current_a;
+    if (leg.rest_centers.size()
+        != leg.segment_by_voxel.size()) {
+        throw std::logic_error(
+            "detached leg segment mapping mismatch");
+    }
 
     std::vector<sarx::Vec3> centers;
-
     centers.reserve(
         leg.rest_centers.size());
 
-    for (const auto& rest_center
-         : leg.rest_centers) {
+    for (std::size_t i = 0;
+         i < leg.rest_centers.size();
+         ++i) {
 
         centers.push_back(
-            current_a
-            + sarx::rotate_between(
-                rest_axis,
-                current_axis,
-                rest_center - leg.rest_a));
+            leg.articulation.transform_point(
+                leg.segment_by_voxel[i],
+                leg.rest_centers[i]));
     }
 
     return centers;
@@ -417,138 +363,6 @@ sarx::Vec3 centroid(
     return center
         / static_cast<double>(
             points.size());
-}
-
-void step_detached_leg(
-    DetachedLeg& leg,
-    double dt,
-    double voxel_size) {
-
-    sarx::StepConfig config;
-    config.substeps = 8;
-    config.solver_iterations = 16;
-    config.gravity = {0.0, -9.81, 0.0};
-
-    leg.motion.step(
-        dt,
-        config);
-
-    auto& a =
-        leg.motion
-            .particles()[leg.particle_a];
-
-    auto& b =
-        leg.motion
-            .particles()[leg.particle_b];
-
-    const sarx::Vec3 before_a =
-        a.position;
-
-    const sarx::Vec3 before_b =
-        b.position;
-
-    const sarx::Vec3 rest_axis =
-        leg.rest_b - leg.rest_a;
-
-    const double rest_axis_squared =
-        std::max(
-            sarx::length_squared(rest_axis),
-            1e-12);
-
-    const double ground_height =
-        voxel_size * 0.47;
-
-    bool contacted = false;
-
-    for (int iteration = 0;
-         iteration < 10;
-         ++iteration) {
-
-        const sarx::Vec3 current_axis =
-            b.position - a.position;
-
-        for (const auto& rest_center
-             : leg.rest_centers) {
-
-            const sarx::Vec3 world_center =
-                a.position
-                + sarx::rotate_between(
-                    rest_axis,
-                    current_axis,
-                    rest_center - leg.rest_a);
-
-            if (world_center.y
-                >= ground_height) {
-                continue;
-            }
-
-            const double penetration =
-                ground_height
-                - world_center.y;
-
-            const double t =
-                std::clamp(
-                    sarx::dot(
-                        rest_center - leg.rest_a,
-                        rest_axis)
-                    / rest_axis_squared,
-                    0.0,
-                    1.0);
-
-            const double wa = 1.0 - t;
-            const double wb = t;
-
-            const double denominator =
-                std::max(
-                    wa * wa + wb * wb,
-                    1e-12);
-
-            a.position.y +=
-                penetration * wa
-                / denominator;
-
-            b.position.y +=
-                penetration * wb
-                / denominator;
-
-            contacted = true;
-        }
-    }
-
-    if (contacted) {
-        a.velocity +=
-            (a.position - before_a)
-            / dt
-            * 0.18;
-
-        b.velocity +=
-            (b.position - before_b)
-            / dt
-            * 0.18;
-
-        constexpr double restitution = 0.06;
-        constexpr double friction = 0.58;
-
-        for (auto* particle : {&a, &b}) {
-            if (particle->velocity.y < 0.0) {
-                particle->velocity.y =
-                    -particle->velocity.y
-                    * restitution;
-            }
-
-            particle->velocity.x *= friction;
-            particle->velocity.z *= friction;
-            particle->velocity *= 0.992;
-        }
-
-        ++leg.ground_contacts;
-        leg.ever_grounded = true;
-    }
-
-    leg.max_rotation_radians =
-        std::max(
-            leg.max_rotation_radians,
-            axis_rotation(leg));
 }
 
 } // namespace
