@@ -9,25 +9,57 @@
 namespace sarx {
 namespace {
 
-bool contains(const MaterialRegion& region, const Vec3& p) {
-    return p.x >= region.min.x && p.x <= region.max.x
-        && p.y >= region.min.y && p.y <= region.max.y
-        && p.z >= region.min.z && p.z <= region.max.z;
+double point_segment_distance_squared(
+    const Vec3& p,
+    const Vec3& a,
+    const Vec3& b) {
+
+    const Vec3 ab = b - a;
+    const double denom = length_squared(ab);
+    const double t = denom > 1e-12
+        ? std::clamp(dot(p - a, ab) / denom, 0.0, 1.0)
+        : 0.0;
+    return length_squared(p - (a + ab * t));
 }
 
-MaterialId material_at(
+bool contains(const MaterialRegion& region, const Vec3& p) {
+    switch (region.shape) {
+    case RegionShape::Box:
+        return p.x >= region.min.x && p.x <= region.max.x
+            && p.y >= region.min.y && p.y <= region.max.y
+            && p.z >= region.min.z && p.z <= region.max.z;
+    case RegionShape::Sphere:
+        return region.radius > 0.0
+            && length_squared(p - region.center)
+                <= region.radius * region.radius;
+    case RegionShape::Capsule:
+        return region.radius > 0.0
+            && point_segment_distance_squared(p, region.a, region.b)
+                <= region.radius * region.radius;
+    }
+    return false;
+}
+
+struct RegionSample {
+    MaterialId material{kDefaultMaterial};
+    Vec3 fiber{};
+};
+
+RegionSample sample_at(
     const Vec3& p,
     MaterialId fallback,
     const std::vector<MaterialRegion>& regions) {
 
-    MaterialId result = fallback;
+    RegionSample result;
+    result.material = fallback;
     int best_priority = std::numeric_limits<int>::min();
 
     for (const auto& region : regions) {
         if (!contains(region, p)) continue;
         if (region.priority < best_priority) continue;
         best_priority = region.priority;
-        result = region.material;
+        result.material = region.material;
+        result.fiber = region.fiber_direction;
     }
     return result;
 }
@@ -82,14 +114,17 @@ VoxelLattice build_voxel_lattice(
     lattice.nz = spec.nz;
     lattice.spacing = spec.spacing;
     lattice.particle_materials.reserve(spec.nx * spec.ny * spec.nz);
+    lattice.particle_fibers.reserve(spec.nx * spec.ny * spec.nz);
 
     for (std::size_t z = 0; z < spec.nz; ++z) {
         for (std::size_t y = 0; y < spec.ny; ++y) {
             for (std::size_t x = 0; x < spec.nx; ++x) {
                 const Vec3 p = node_position(spec, x, y, z);
                 lattice.body.add_particle(p, spec.particle_mass);
-                lattice.particle_materials.push_back(
-                    material_at(p, spec.default_material, regions));
+                const auto sample =
+                    sample_at(p, spec.default_material, regions);
+                lattice.particle_materials.push_back(sample.material);
+                lattice.particle_fibers.push_back(sample.fiber);
             }
         }
     }
@@ -140,15 +175,16 @@ VoxelLattice build_voxel_lattice(
                         static_cast<std::size_t>(bz));
                     const Vec3 p1 = lattice.body.particles()[b].position;
                     const Vec3 mid = (p0 + p1) * 0.5;
-                    const MaterialId material =
-                        material_at(mid, spec.default_material, regions);
+                    const auto sample =
+                        sample_at(mid, spec.default_material, regions);
 
                     lattice.body.add_structural_constraint(
                         a,
                         b,
                         spec.structural_compliance,
                         spec.structural_break_damage,
-                        material);
+                        sample.material,
+                        sample.fiber);
                 }
             }
         }
@@ -173,8 +209,8 @@ VoxelLattice build_voxel_lattice(
                             (static_cast<double>(y) + 0.5) * spec.spacing,
                             (static_cast<double>(z) + 0.5) * spec.spacing
                         };
-                    const MaterialId material =
-                        material_at(cell_center, spec.default_material, regions);
+                    const auto cell_sample =
+                        sample_at(cell_center, spec.default_material, regions);
 
                     const std::array<std::array<ParticleId, 4>, 6> tets{{
                         {v000, v100, v110, v111},
@@ -193,7 +229,7 @@ VoxelLattice build_voxel_lattice(
                             tet[3],
                             spec.volume_compliance,
                             spec.volume_break_damage,
-                            material);
+                            cell_sample.material);
                     }
                 }
             }
