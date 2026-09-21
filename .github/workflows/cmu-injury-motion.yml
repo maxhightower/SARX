@@ -71,7 +71,7 @@ jobs:
           do
             mkdir -p "build/cmu-validation/${semantic}"
 
-            ./build/cmu-sarx/sarx_character_demo               --character assets/quaternius/character.glb               --animations "assets/cmu/${semantic}.glb"               --clip "${semantic}"               --output "build/cmu-validation/${semantic}"               --frames 3               --fps 30               --validate-all-clips               2>&1 | tee "build/cmu-logs/${semantic}-sarx.log"
+            ./build/cmu-sarx/sarx_character_demo               --character assets/quaternius/character.glb               --animations "assets/cmu/${semantic}.glb"               --clip "${semantic}"               --output "build/cmu-validation/${semantic}"               --frames 3               --fps 30               --validate-all-clips               --min-mapped-joints 17               2>&1 | tee "build/cmu-logs/${semantic}-sarx.log"
           done
 
       - name: Commit validated injury animations
@@ -89,6 +89,9 @@ jobs:
           git config user.name "sarx-research-bot"
           git config user.email "actions@users.noreply.github.com"
           git commit -m "Vendor validated authored CMU injury motions"
+
+          git fetch origin "${GITHUB_REF_NAME}"
+          git rebase "origin/${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Upload compatibility evidence
