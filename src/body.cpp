@@ -84,7 +84,8 @@ ConstraintId Body::add_structural_constraint(
     ParticleId b,
     double compliance,
     double break_damage,
-    MaterialId material) {
+    MaterialId material,
+    const Vec3& material_fiber_rest) {
 
     if (a >= particles_.size() || b >= particles_.size() || a == b) {
         throw std::out_of_range("invalid structural constraint endpoints");
@@ -102,6 +103,7 @@ ConstraintId Body::add_structural_constraint(
     c.compliance = compliance;
     c.break_damage = break_damage;
     c.material = material;
+    c.material_fiber_rest = material_fiber_rest;
     structural_.push_back(c);
     return structural_.size() - 1;
 }
