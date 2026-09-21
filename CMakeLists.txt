@@ -77,6 +77,12 @@ add_executable(sarx_character_voxel_thigh_demo
 target_link_libraries(sarx_character_voxel_thigh_demo PRIVATE sarx)
 target_compile_features(sarx_character_voxel_thigh_demo PRIVATE cxx_std_20)
 
+add_executable(sarx_character_voxel_foot_injury_demo
+    tools/sarx_character_voxel_foot_injury_demo.cpp
+)
+target_link_libraries(sarx_character_voxel_foot_injury_demo PRIVATE sarx)
+target_compile_features(sarx_character_voxel_foot_injury_demo PRIVATE cxx_std_20)
+
 if (SARX_BUILD_TESTS)
     enable_testing()
 
