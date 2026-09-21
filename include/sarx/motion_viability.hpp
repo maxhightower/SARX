@@ -19,6 +19,7 @@ enum class MotionLocomotionType {
     BipedalLocomotion,
     Collapse,
     Kneeling,
+    Limp,
     Hop,
     Crawl
 };
