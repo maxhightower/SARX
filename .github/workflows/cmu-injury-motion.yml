@@ -51,7 +51,14 @@ jobs:
             source_id="$1"
             semantic="$2"
 
-            blender --background --factory-startup               --python tools/convert_cmu_injury_fbx.py               -- "build/cmu-source/${source_id}.fbx" "assets/cmu/${semantic}.glb"               2>&1 | tee "build/cmu-logs/${semantic}-blender.log"
+            blender --background --factory-startup \
+              --python-exit-code 1 \
+              --python tools/convert_cmu_injury_fbx.py \
+              -- \
+              "build/cmu-source/${source_id}.fbx" \
+              "assets/quaternius/character.glb" \
+              "assets/cmu/${semantic}.glb" \
+              2>&1 | tee "build/cmu-logs/${semantic}-blender.log"
           done
 
           sha256sum assets/cmu/*.glb | tee assets/cmu/generated-sha256.txt
