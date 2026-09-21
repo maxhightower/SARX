@@ -122,11 +122,21 @@ describe_motion_capability(
             {"spine_01", 0.45}
         };
 
-        capability.allowed_substitutions = {
+        capability.alternative_chains = {
             {
                 "usable_kneeling_leg",
-                {"thigh_l", "thigh_r"},
-                0.60,
+                {
+                    {
+                        {"thigh_l", 0.60},
+                        {"calf_l", 0.55},
+                        {"foot_l", 0.45}
+                    },
+                    {
+                        {"thigh_r", 0.60},
+                        {"calf_r", 0.55},
+                        {"foot_r", 0.45}
+                    }
+                },
                 1
             }
         };
@@ -149,23 +159,21 @@ describe_motion_capability(
             {"spine_01", 0.45}
         };
 
-        capability.allowed_substitutions = {
+        capability.alternative_chains = {
             {
-                "usable_hop_thigh",
-                {"thigh_l", "thigh_r"},
-                0.70,
-                1
-            },
-            {
-                "usable_hop_calf",
-                {"calf_l", "calf_r"},
-                0.70,
-                1
-            },
-            {
-                "usable_hop_foot",
-                {"foot_l", "foot_r"},
-                0.65,
+                "usable_hop_leg",
+                {
+                    {
+                        {"thigh_l", 0.70},
+                        {"calf_l", 0.70},
+                        {"foot_l", 0.65}
+                    },
+                    {
+                        {"thigh_r", 0.70},
+                        {"calf_r", 0.70},
+                        {"foot_r", 0.65}
+                    }
+                },
                 1
             }
         };
@@ -187,25 +195,46 @@ describe_motion_capability(
             {"spine_01", 0.45}
         };
 
-        capability.allowed_substitutions = {
+        capability.alternative_chains = {
             {
-                "usable_crawl_upper_limb",
+                "usable_crawl_arm",
                 {
-                    "upperarm_l",
-                    "upperarm_r"
+                    {
+                        {"upperarm_l", 0.55},
+                        {"lowerarm_l", 0.55}
+                    },
+                    {
+                        {"upperarm_r", 0.55},
+                        {"lowerarm_r", 0.55}
+                    }
                 },
-                0.55,
-                1
-            },
-            {
-                "usable_crawl_lower_limb",
-                {
-                    "lowerarm_l",
-                    "lowerarm_r"
-                },
-                0.55,
                 1
             }
+        };
+
+        capability.requires_grounded = true;
+        capability.minimum_support_contacts = 1;
+        return capability;
+    }
+
+    if (contains_any(
+            name,
+            {"getup", "get_up", "get-up", "stand_up", "standup"})) {
+
+        capability.semantic_intent =
+            "stand";
+        capability.locomotion_type =
+            MotionLocomotionType::Other;
+
+        capability.required_regions = {
+            {"pelvis", 0.60},
+            {"spine_01", 0.55},
+            {"thigh_l", 0.65},
+            {"calf_l", 0.60},
+            {"foot_l", 0.55},
+            {"thigh_r", 0.65},
+            {"calf_r", 0.60},
+            {"foot_r", 0.55}
         };
 
         capability.requires_grounded = true;
@@ -297,6 +326,47 @@ evaluate_motion_viability(
             result.failed_requirements.push_back(
                 "substitution:"
                 + substitution.label);
+        }
+    }
+
+    for (const auto& chain
+         : capability.alternative_chains) {
+
+        std::size_t complete_alternatives = 0;
+
+        for (const auto& alternative
+             : chain.alternatives) {
+
+            bool complete = true;
+
+            for (const auto& requirement
+                 : alternative) {
+
+                if (fraction_for(
+                        fractions,
+                        requirement.region)
+                    < requirement
+                        .minimum_attached_fraction) {
+
+                    complete = false;
+                    break;
+                }
+            }
+
+            if (complete) {
+                ++complete_alternatives;
+            }
+        }
+
+        if (complete_alternatives
+            >= chain.minimum_complete_alternatives) {
+
+            result.usable_substitutions.push_back(
+                chain.label);
+        } else {
+            result.failed_requirements.push_back(
+                "alternative_chain:"
+                + chain.label);
         }
     }
 
