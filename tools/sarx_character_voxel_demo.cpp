@@ -726,6 +726,7 @@ int main(int argc, char** argv) {
                     voxel_character
                         .detach_anatomical_region_if_disconnected(
                             "hand_l",
+                            {"lowerarm_l"},
                             6);
 
                 if (component) {
