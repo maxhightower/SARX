@@ -421,6 +421,7 @@ std::array<double, 4> sample_track(
 struct GltfCharacter::Impl {
     CharacterAssetStats stats{};
     std::vector<std::string> animation_names;
+    std::vector<CharacterJointInfo> joint_infos;
 
     std::vector<NodePose> rest_nodes;
     std::vector<SkinData> skins;
@@ -717,15 +718,47 @@ void GltfCharacter::load(
 
         for (const auto& skin : next->skins) {
             for (const int joint : skin.joints) {
-                if (joint >= 0
-                    && static_cast<std::size_t>(joint)
-                        < seen.size()
-                    && !seen[joint]) {
-                    seen[joint] = 1u;
-                    ++next->stats.skin_joints;
+                if (joint < 0
+                    || static_cast<std::size_t>(joint)
+                        >= seen.size()
+                    || seen[joint]) {
+                    continue;
                 }
+
+                seen[joint] = 1u;
+
+                CharacterJointInfo info;
+                info.name =
+                    next->rest_nodes[joint].name;
+
+                const int parent =
+                    next->rest_nodes[joint].parent;
+
+                if (parent >= 0
+                    && static_cast<std::size_t>(parent)
+                        < next->rest_nodes.size()) {
+                    info.parent =
+                        next->rest_nodes[parent].name;
+                }
+
+                cgltf_float world[16]{};
+                cgltf_node_transform_world(
+                    &char_data->nodes[joint],
+                    world);
+
+                info.rest_world_position = {
+                    world[12],
+                    world[13],
+                    world[14]
+                };
+
+                next->joint_infos.push_back(
+                    std::move(info));
             }
         }
+
+        next->stats.skin_joints =
+            next->joint_infos.size();
     }
 
     next->clips.reserve(anim_data->animations_count);
@@ -890,6 +923,11 @@ const CharacterAssetStats& GltfCharacter::stats() const {
 const std::vector<std::string>&
 GltfCharacter::animation_names() const {
     return impl_->animation_names;
+}
+
+const std::vector<CharacterJointInfo>&
+GltfCharacter::skin_joints() const {
+    return impl_->joint_infos;
 }
 
 std::size_t GltfCharacter::find_animation(
