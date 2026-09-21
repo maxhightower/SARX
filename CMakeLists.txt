@@ -49,6 +49,12 @@ add_executable(sarx_character_demo
 target_link_libraries(sarx_character_demo PRIVATE sarx)
 target_compile_features(sarx_character_demo PRIVATE cxx_std_20)
 
+add_executable(sarx_character_severance_demo
+    tools/sarx_character_severance_demo.cpp
+)
+target_link_libraries(sarx_character_severance_demo PRIVATE sarx)
+target_compile_features(sarx_character_severance_demo PRIVATE cxx_std_20)
+
 if (SARX_BUILD_TESTS)
     enable_testing()
 
@@ -89,6 +95,19 @@ if (SARX_BUILD_TESTS)
                 --clip Walk
                 --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_real_character_frames
                 --frames 3
+                --fps 30
+        )
+
+        add_test(
+            NAME sarx_real_character_severance_smoke
+            COMMAND sarx_character_severance_demo
+                --character ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/character.glb
+                --animations ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/animations.glb
+                --clip Walk
+                --detach-root upperarm_r
+                --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_real_severance_frames
+                --frames 5
+                --cut-frame 2
                 --fps 30
         )
     endif()
