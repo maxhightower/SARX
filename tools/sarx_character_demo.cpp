@@ -29,6 +29,8 @@ struct Args {
     bool list_joints{false};
     bool validate_all_clips{false};
     int min_mapped_joints{0};
+    double max_motion_rms{
+        std::numeric_limits<double>::infinity()};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -71,6 +73,11 @@ Args parse_args(int argc, char** argv) {
             && i + 1 < argc) {
             args.min_mapped_joints =
                 std::stoi(argv[++i]);
+        } else if (
+            value == "--max-motion-rms"
+            && i + 1 < argc) {
+            args.max_motion_rms =
+                std::stod(argv[++i]);
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_demo"
@@ -82,7 +89,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--fps N]"
                 << " [--list-joints]"
                 << " [--validate-all-clips]"
-                << " [--min-mapped-joints N]\n";
+                << " [--min-mapped-joints N]"
+                << " [--max-motion-rms N]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -92,9 +100,10 @@ Args parse_args(int argc, char** argv) {
 
     if (args.frames <= 0
         || args.fps <= 0.0
-        || args.min_mapped_joints < 0) {
+        || args.min_mapped_joints < 0
+        || args.max_motion_rms <= 0.0) {
         throw std::invalid_argument(
-            "frames/fps must be positive and min mapped joints non-negative");
+            "frames/fps/max motion RMS must be positive and min mapped joints non-negative");
     }
 
     return args;
@@ -365,6 +374,12 @@ int main(int argc, char** argv) {
                 depth,
                 0.5
             });
+
+        if (motion_rms > args.max_motion_rms) {
+            throw std::runtime_error(
+                "animation motion RMS exceeds compatibility bound: "
+                + std::to_string(motion_rms));
+        }
 
         if (motion_rms <= scale * 0.001) {
             throw std::runtime_error(
