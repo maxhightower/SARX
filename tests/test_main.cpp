@@ -2026,8 +2026,8 @@ void test_authored_injury_motion_replaces_walk_after_foot_loss() {
         "isolated foot loss should select authored injury locomotion");
 
     check(
-        plan.motion_id == "CMU_WalkWoundedLeg",
-        "WalkWoundedLeg should lead the authored foot-loss candidate set");
+        plan.motion_id == "CMU_Limp",
+        "CMU Limp should be the certified authored successor for complete foot loss");
 
     const auto injury_viability =
         sarx::evaluate_motion_viability(
