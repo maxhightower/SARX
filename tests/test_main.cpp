@@ -1447,6 +1447,56 @@ void test_tetrahedral_cut_honors_capsule_radius() {
           "out-of-radius tetrahedron should not receive a fracture event");
 }
 
+
+void test_adaptive_domain_closes_over_detached_free_island() {
+    Body body;
+
+    const auto root_bone =
+        body.add_bone(sarx::kNoParent, {0.0, 0.0, 0.0});
+
+    const auto left0 = body.add_particle({0.0, 0.0, 0.0});
+    const auto left1 = body.add_particle({1.0, 0.0, 0.0});
+    const auto right0 = body.add_particle({2.0, 0.0, 0.0});
+    const auto right1 = body.add_particle({3.0, 0.0, 0.0});
+    const auto right2 = body.add_particle({4.0, 0.0, 0.0});
+
+    body.add_structural_constraint(left0, left1);
+    const auto bridge =
+        body.add_structural_constraint(left1, right0);
+    body.add_structural_constraint(right0, right1);
+    body.add_structural_constraint(right1, right2);
+
+    body.add_attachment(
+        left0,
+        root_bone,
+        {},
+        1e-8);
+
+    body.break_structural(bridge);
+
+    sarx::AdaptiveDamageDomain seed;
+    seed.particles = {right0};
+
+    const auto closed =
+        sarx::close_over_free_islands(body, seed);
+
+    check(closed.particles.size() == 3,
+          "touching one particle of a detached free island should awaken the entire island");
+    check(std::find(
+              closed.particles.begin(),
+              closed.particles.end(),
+              right2) != closed.particles.end(),
+          "free-island closure should include distal particles beyond the wound radius");
+    check(std::find(
+              closed.particles.begin(),
+              closed.particles.end(),
+              left0) == closed.particles.end(),
+          "free-island closure should not promote the rig-authoritative body side");
+
+    check(closed.structural.size() == 2,
+          "free-island closure should include all surviving internal structural constraints");
+}
+
 } // namespace
 
 int main() {
@@ -1484,6 +1534,7 @@ int main() {
     test_soa_full_solver_matches_body();
     test_soa_restricted_solver_matches_body();
     test_tetrahedral_cut_honors_capsule_radius();
+    test_adaptive_domain_closes_over_detached_free_island();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
