@@ -26,7 +26,7 @@ Attachments couple physical particles to bone targets through compliant constrai
 
 ## Dynamic islands
 
-Physical connectivity is computed only from active structural constraints. Each connected component reports its particles, mass, linear momentum, and whether a surviving attachment reaches a root-connected bone.
+Physical connectivity is computed from active structural constraints **and active tetrahedral volume cells**. Each connected component reports its particles, mass, linear momentum, and whether a surviving attachment reaches a root-connected bone.
 
 A component with no root-connected attachment is a free dynamic island. Topology changes never reset its velocity, so detachment preserves existing motion.
 
@@ -35,8 +35,9 @@ A component with no root-connected attachment is a free dynamic island. Topology
 SARX supports capsule/blade sweeps and spherical damage volumes. Spatial primitives are tested against:
 
 1. particle-to-particle structural segments,
-2. particle-to-bone-target attachment segments,
-3. parent-target-to-child-target rig-joint segments.
+2. tetrahedral volume cells,
+3. particle-to-bone-target attachment segments,
+4. radius-bearing parent/child joint capsules.
 
 Damage authority remains in the exact router: geometry establishes contact, material response converts event energy into damage, and body state decides whether a threshold was crossed.
 
@@ -57,16 +58,16 @@ Strain-driven failures use the same event stream as spatial weapon/impact damage
 
 ## V0.3 anisotropic materials
 
-A material can optionally define a world-space fiber direction plus separate longitudinal and transverse cut multipliers.
+A material can define a rest-space fiber direction plus separate longitudinal and transverse cut multipliers. Structural constraints also support a per-region rest-fiber override.
 
-For a structural/attachment/joint segment, effective cut resistance is interpolated from the squared alignment between the target segment and the fiber direction.
+For structural tissue, SARX transports that rest fiber by the minimal rotation from the constraint's rest axis to its current deformed axis. Effective cut resistance is then interpolated from the squared alignment between the current transported fiber and the current tissue segment.
 
 This lets the same blade energy produce different outcomes when cutting:
 
 - along strong fibers,
 - across fibers.
 
-The current reference uses world-space fibers for simplicity. A later anatomical representation should transport local material frames with the deforming body.
+This makes anisotropy body-relative: rotating or deforming tissue rotates its material orientation rather than leaving fiber direction frozen in world space.
 
 ## V0.3 strain-driven failure
 
@@ -119,8 +120,9 @@ A `DamageBroadPhase` uniform grid caches the current pose's damage-receiving seg
 The grid indexes:
 
 - active structural constraints,
+- active tetrahedral volume cells,
 - active animation attachments,
-- active parent-child bone joints.
+- full AABBs of active parent-child joint capsules.
 
 A local capsule/sphere query produces a `DamageCandidates` set. Only those IDs are passed to the exact damage router.
 
@@ -202,15 +204,53 @@ so its target reconstructs the original physical rest pose exactly. Embedded chi
 
 V0.4A is intentionally still a particle/link reference volume, not the final continuum model. Its purpose is to create deterministic 3D fixtures on which the next mechanics can be developed and benchmarked.
 
-## Next milestone: V0.4B
+## V0.4B anatomical deformable volume
 
-Continue from the generated lattice toward an anatomical deformable volume:
+V0.4B converts the V0.4A lattice from a spring-network fixture into a first anatomical-volume reference.
 
-- local material/fiber frames that move with deformation,
-- bone/joint capsule geometry rather than point-only bone targets,
-- explicit volumetric/tetrahedral constraints for volume preservation,
-- anatomical region construction,
-- adaptive damage-domain activation,
-- GPU-friendly structure-of-arrays buffers,
-- CPU/GPU parity harness,
-- first visual debug renderer for particles, constraints, bones, wounds, and islands.
+### Transported material frames
+
+Every structural constraint retains its rest direction. Region generation can also assign a per-constraint rest-fiber orientation. At damage time SARX rotates the rest fiber from the rest structural axis into the current deformed axis before evaluating longitudinal/transverse cut response.
+
+### Joint capsules
+
+Parent-child rig links now have an explicit radius. The physical joint representation is a capsule from the parent's animated target to the child's animated target rather than an infinitely thin line. The same radius is honored by exact damage, broad-phase indexing, and adaptive-domain selection.
+
+### Tetrahedral volume constraints
+
+Body supports explicit XPBD signed-volume constraints over four particles. Each tetrahedron stores particle IDs, signed rest volume, compliance, progressive damage, break threshold, active topology state, and material ID.
+
+Generated lattice cells are deterministically decomposed into six tetrahedra sharing the cell's 000-to-111 diagonal. Active tetrahedra participate in connected-component authority because they physically couple their particles even if distance links fail.
+
+### Cut-to-volume topology
+
+A cutting segment is tested against candidate tetrahedra. When a cut enters a tet, material-scaled damage is applied to the volume cell and a tetrahedral fracture event is emitted if it crosses its break threshold.
+
+This prevents a severed region from remaining invisibly connected by an intact volume constraint after surrounding distance links have been cut.
+
+### Anatomical region primitives
+
+MaterialRegion now supports boxes, spheres, capsules, priority-based overlap, material assignment, and optional rest-space fiber direction.
+
+Node positions sample particle material/fiber state, structural midpoints sample link material/fiber state, and lattice-cell centers assign tetrahedral material.
+
+### Adaptive damage domains
+
+select_damage_domain produces a wound-local set of particles, structural constraints, tetrahedral cells, attachments, and joint capsules. It is bookkeeping for future adaptive simulation and GPU work; it does not decide fracture.
+
+### GPU-oriented SoA mirror
+
+snapshot_body_soa converts the authoritative Body into structure-of-arrays buffers for particles, structural constraints, tetrahedral cells, bones/joints, and attachments. The SoA representation is currently an export boundary, not an independent solver.
+
+## Next milestone: V0.4C / V0.5 preparation
+
+The next work should focus on execution and visualization:
+
+- incremental/refittable adaptive-domain indices,
+- actual restricted-domain solver scheduling,
+- GPU compute kernels over the SoA layout,
+- CPU/GPU numerical and topology parity harness,
+- tet-aware cut halo / near-face capsule intersection,
+- richer local-frame transport,
+- first visual debug renderer for particles, tets, constraints, bones, wounds, and islands,
+- a small rigged humanoid fixture exercising animation -> deformation -> cut -> severance.
