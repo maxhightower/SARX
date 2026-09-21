@@ -31,6 +31,8 @@ CLIP_NAMES = {
     "91_16": "CMU_Limp",
     "91_24": "CMU_HurtLegWalk",
     "91_25": "CMU_DragBadLegWalk",
+    "139_19": "CMU_WalkWoundedLeg",
+    "142_12": "CMU_PainfulLeftKnee",
 }
 
 def clean_scene():
