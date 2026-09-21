@@ -463,11 +463,23 @@ def main():
 
     stable_start_index = 0
 
+    first_step_m = (
+        horizontal_steps[0]
+        * root_unit_scale
+        if horizontal_steps
+        else 0.0
+    )
+
     if (
         len(horizontal_steps) >= 2
-        and median_step > 1e-9
-        and horizontal_steps[0]
-            > median_step * 8.0
+        and (
+            first_step_m > 0.05
+            or (
+                median_step > 1e-9
+                and horizontal_steps[0]
+                    > median_step * 8.0
+            )
+        )
     ):
         stable_start_index = 1
 
