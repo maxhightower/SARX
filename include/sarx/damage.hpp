@@ -64,6 +64,9 @@ struct CapsuleDamage {
     double energy{1.0};
     DamageMode mode{DamageMode::Cut};
     DamageEventId event_id{0};
+
+    // Optional persistent cut-surface normal for downstream wound rendering.
+    Vec3 cut_normal{};
 };
 
 struct SphereDamage {
@@ -104,6 +107,14 @@ struct DamageReport {
     [[nodiscard]] std::size_t broken_count() const;
 };
 
+struct WoundDescriptor {
+    DamageEventId event_id{};
+    Vec3 center{};
+    Vec3 normal{};
+    double radius{};
+    std::size_t broken_target_count{};
+};
+
 class DamageSystem {
 public:
     MaterialTable& materials() { return materials_; }
@@ -119,7 +130,10 @@ public:
         const std::vector<DamageCommand>& commands);
 
     [[nodiscard]] const std::vector<DamageCommand>& history() const { return history_; }
+    [[nodiscard]] const std::vector<WoundDescriptor>& wounds() const { return wounds_; }
+
     void clear_history();
+    void clear_wounds();
 
 private:
     [[nodiscard]] DamageEventId resolve_event_id(DamageEventId requested);
@@ -127,6 +141,7 @@ private:
     MaterialTable materials_;
     DamageEventId next_event_id_{1};
     std::vector<DamageCommand> history_;
+    std::vector<WoundDescriptor> wounds_;
 };
 
 } // namespace sarx
