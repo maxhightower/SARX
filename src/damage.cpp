@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace sarx {
@@ -199,6 +200,139 @@ bool segment_triangle_intersection(
 
     hit = p + dir * std::clamp(t, 0.0, 1.0);
     return true;
+}
+
+Vec3 closest_point_on_triangle(
+    const Vec3& p,
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c) {
+
+    const Vec3 ab = b - a;
+    const Vec3 ac = c - a;
+    const Vec3 ap = p - a;
+
+    const double d1 = dot(ab, ap);
+    const double d2 = dot(ac, ap);
+    if (d1 <= 0.0 && d2 <= 0.0) return a;
+
+    const Vec3 bp = p - b;
+    const double d3 = dot(ab, bp);
+    const double d4 = dot(ac, bp);
+    if (d3 >= 0.0 && d4 <= d3) return b;
+
+    const double vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) {
+        const double v = d1 / (d1 - d3);
+        return a + ab * v;
+    }
+
+    const Vec3 cp = p - c;
+    const double d5 = dot(ab, cp);
+    const double d6 = dot(ac, cp);
+    if (d6 >= 0.0 && d5 <= d6) return c;
+
+    const double vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) {
+        const double w = d2 / (d2 - d6);
+        return a + ac * w;
+    }
+
+    const double va = d3 * d6 - d5 * d4;
+    if (va <= 0.0
+        && (d4 - d3) >= 0.0
+        && (d5 - d6) >= 0.0) {
+        const Vec3 bc = c - b;
+        const double w =
+            (d4 - d3)
+            / ((d4 - d3) + (d5 - d6));
+        return b + bc * w;
+    }
+
+    const double denom = 1.0 / (va + vb + vc);
+    const double v = vb * denom;
+    const double w = vc * denom;
+    return a + ab * v + ac * w;
+}
+
+SegmentDistanceResult segment_triangle_distance(
+    const Vec3& p,
+    const Vec3& q,
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c) {
+
+    Vec3 hit{};
+    if (segment_triangle_intersection(p, q, a, b, c, hit)) {
+        return {0.0, hit, hit};
+    }
+
+    SegmentDistanceResult best{
+        std::numeric_limits<double>::infinity(),
+        {},
+        {}
+    };
+
+    const auto consider = [&best](const SegmentDistanceResult& candidate) {
+        if (candidate.distance_squared < best.distance_squared) {
+            best = candidate;
+        }
+    };
+
+    const Vec3 p_triangle = closest_point_on_triangle(p, a, b, c);
+    consider({length_squared(p - p_triangle), p, p_triangle});
+
+    const Vec3 q_triangle = closest_point_on_triangle(q, a, b, c);
+    consider({length_squared(q - q_triangle), q, q_triangle});
+
+    consider(segment_segment_distance(p, q, a, b));
+    consider(segment_segment_distance(p, q, b, c));
+    consider(segment_segment_distance(p, q, c, a));
+
+    return best;
+}
+
+SegmentDistanceResult segment_tetra_distance(
+    const Vec3& p,
+    const Vec3& q,
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& d) {
+
+    Vec3 hit{};
+    if (point_in_tetra(p, a, b, c, d)) {
+        return {0.0, p, p};
+    }
+    if (point_in_tetra(q, a, b, c, d)) {
+        return {0.0, q, q};
+    }
+
+    const std::array<std::array<Vec3, 3>, 4> faces{{
+        {a, b, c},
+        {a, b, d},
+        {a, c, d},
+        {b, c, d}
+    }};
+
+    SegmentDistanceResult best{
+        std::numeric_limits<double>::infinity(),
+        {},
+        {}
+    };
+
+    for (const auto& face : faces) {
+        const auto candidate = segment_triangle_distance(
+            p, q, face[0], face[1], face[2]);
+        if (candidate.distance_squared < best.distance_squared) {
+            best = candidate;
+        }
+        if (best.distance_squared <= 1e-20) {
+            break;
+        }
+    }
+
+    return best;
 }
 
 bool segment_tetra_intersection(
@@ -413,14 +547,20 @@ DamageReport DamageSystem::apply_capsule(
             const Vec3 p2 = body.particles()[t.c].position;
             const Vec3 p3 = body.particles()[t.d].position;
 
-            Vec3 hit{};
-            if (!segment_tetra_intersection(
-                    damage.a, damage.b, p0, p1, p2, p3, hit)) {
-                continue;
-            }
+            const auto proximity = segment_tetra_distance(
+                damage.a,
+                damage.b,
+                p0,
+                p1,
+                p2,
+                p3);
 
             const auto material = materials_.get(t.material);
-            const double amount = damage.energy / material.cut_resistance;
+            const double amount = damage_from_distance(
+                proximity.distance_squared,
+                damage.radius,
+                damage.energy,
+                material.cut_resistance);
             if (amount <= 0.0) continue;
 
             const bool was_active = t.active;
@@ -435,7 +575,7 @@ DamageReport DamageSystem::apply_capsule(
                 DamageTargetKind::TetrahedralConstraint,
                 id,
                 t.material,
-                hit,
+                midpoint(proximity.point_a, proximity.point_b),
                 amount,
                 broke);
         }
