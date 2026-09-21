@@ -15,6 +15,12 @@ struct CharacterMeshFrame {
     std::vector<std::uint32_t> indices;
 };
 
+struct CharacterSplitFrame {
+    CharacterMeshFrame body;
+    CharacterMeshFrame detached;
+    std::size_t boundary_triangles_removed{};
+};
+
 struct CharacterJointInfo {
     std::string name;
     std::string parent;
@@ -57,6 +63,13 @@ public:
     [[nodiscard]] CharacterMeshFrame sample(
         std::size_t animation,
         double time_seconds,
+        bool loop = true,
+        const Vec3& world_offset = {}) const;
+
+    [[nodiscard]] CharacterSplitFrame sample_split_branch(
+        std::size_t animation,
+        double time_seconds,
+        const std::string& detached_root_joint_fragment,
         bool loop = true,
         const Vec3& world_offset = {}) const;
 
