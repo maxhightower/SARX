@@ -17,6 +17,7 @@ add_library(sarx
     src/voxel_character.cpp
     src/motion_viability.cpp
     src/motion_recovery.cpp
+    src/authored_root_motion.cpp
     src/detached_articulation.cpp
 )
 
