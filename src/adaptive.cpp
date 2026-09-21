@@ -424,8 +424,8 @@ void AdaptiveDomainTracker::refit(const Body& body) {
     }
 }
 
-SolverDomain AdaptiveDomainTracker::combined_solver_domain() const {
-    SolverDomain result;
+AdaptiveDamageDomain AdaptiveDomainTracker::combined_damage_domain() const {
+    AdaptiveDamageDomain result;
 
     auto collect = [](const auto& refs, auto& out) {
         for (std::size_t id = 0; id < refs.size(); ++id) {
@@ -441,6 +441,10 @@ SolverDomain AdaptiveDomainTracker::combined_solver_domain() const {
     collect(attachment_refs_, result.attachments);
 
     return result;
+}
+
+SolverDomain AdaptiveDomainTracker::combined_solver_domain() const {
+    return solver_domain(combined_damage_domain());
 }
 
 } // namespace sarx
