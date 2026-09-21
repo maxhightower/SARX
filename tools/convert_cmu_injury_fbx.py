@@ -278,7 +278,7 @@ def main():
 
     print(
         "SARX_CMU_SOURCE_TIMING",
-        motion_start_frame,
+        source_start,
         source_end,
         scene.render.fps,
         scene.render.fps_base,
