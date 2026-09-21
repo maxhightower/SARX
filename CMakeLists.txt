@@ -69,6 +69,12 @@ add_executable(sarx_character_voxel_demo
 target_link_libraries(sarx_character_voxel_demo PRIVATE sarx)
 target_compile_features(sarx_character_voxel_demo PRIVATE cxx_std_20)
 
+add_executable(sarx_character_voxel_thigh_demo
+    tools/sarx_character_voxel_thigh_demo.cpp
+)
+target_link_libraries(sarx_character_voxel_thigh_demo PRIVATE sarx)
+target_compile_features(sarx_character_voxel_thigh_demo PRIVATE cxx_std_20)
+
 if (SARX_BUILD_TESTS)
     enable_testing()
 
@@ -165,6 +171,23 @@ if (SARX_BUILD_TESTS)
                 --require-detachment
                 --require-anatomical-isolation
                 --require-walk-viability
+        )
+
+        add_test(
+            NAME sarx_real_character_voxel_thigh_smoke
+            COMMAND sarx_character_voxel_thigh_demo
+                --character ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/character.glb
+                --animations ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/animations.glb
+                --clip Walk
+                --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_real_voxel_thigh_frames
+                --frames 6
+                --cut-frame 1
+                --fps 30
+                --voxel-size 0.045
+                --require-damage
+                --require-detachment
+                --require-walk-invalidation
+                --require-anatomical-isolation
         )
 
         add_test(
