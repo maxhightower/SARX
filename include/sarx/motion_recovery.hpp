@@ -26,6 +26,7 @@ enum class MotionStrategy {
     Kneel,
     Prone,
     GetUp,
+    Limp,
     Hop,
     Crawl,
     Stop
@@ -83,6 +84,12 @@ struct GroundedRecoveryPlan {
     BehavioralIntent intent,
     GroundedPosture current_posture,
     const std::vector<std::string>& available_motions,
+    const std::vector<AnatomicalAvailability>& anatomy,
+    const MotionPhysicalState& physical_state);
+
+[[nodiscard]] MotionRecoveryPlan plan_locomotion_replacement(
+    BehavioralIntent intent,
+    const std::string& current_motion,
     const std::vector<AnatomicalAvailability>& anatomy,
     const MotionPhysicalState& physical_state);
 
