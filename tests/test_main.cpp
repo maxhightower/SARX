@@ -8,6 +8,7 @@
 #include "sarx/detached_articulation.hpp"
 #include "sarx/motion_viability.hpp"
 #include "sarx/motion_recovery.hpp"
+#include "sarx/procedural_limp.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1984,6 +1985,124 @@ void test_grounded_recovery_getup_requires_intact_biped() {
         "intact anatomy plus authored get-up should prefer standing recovery");
 }
 
+void test_foot_loss_prefers_limp_and_variants_are_distinct() {
+    std::vector<sarx::AnatomicalAvailability> anatomy = {
+        {"pelvis", 100, 100},
+        {"spine_01", 100, 100},
+        {"thigh_l", 100, 100},
+        {"calf_l", 100, 100},
+        {"foot_l", 100, 0},
+        {"thigh_r", 100, 100},
+        {"calf_r", 100, 100},
+        {"foot_r", 100, 100},
+        {"upperarm_l", 100, 100},
+        {"lowerarm_l", 100, 100},
+        {"upperarm_r", 100, 100},
+        {"lowerarm_r", 100, 100}
+    };
+
+    sarx::MotionPhysicalState physical;
+    physical.grounded = true;
+    physical.support_contacts = 1;
+    physical.root_velocity = {0.0, 0.0, -1.0};
+
+    const auto plan =
+        sarx::plan_locomotion_replacement(
+            sarx::BehavioralIntent::MoveForward,
+            "Walk_Formal_Loop",
+            anatomy,
+            physical);
+
+    check(
+        plan.transition_required
+            && plan.strategy
+                == sarx::MotionStrategy::Limp
+            && plan.motion_id
+                == "ProceduralLimp",
+        "isolated foot loss should prefer limp before hop or crawl");
+
+    std::vector<sarx::CharacterVoxel> voxels(4);
+
+    voxels[0].anatomical_region = "pelvis";
+    voxels[1].anatomical_region = "thigh_l";
+    voxels[2].anatomical_region = "calf_l";
+    voxels[3].anatomical_region = "foot_r";
+
+    const std::vector<sarx::Vec3> neutral = {
+        {0.0, 1.0, 0.0},
+        {-0.2, 0.8, 0.0},
+        {-0.2, 0.4, 0.0},
+        {0.2, 0.05, 0.0}
+    };
+
+    const std::vector<sarx::Vec3> walk = {
+        {0.0, 1.0, 0.0},
+        {-0.2, 0.8, 0.15},
+        {-0.2, 0.4, 0.20},
+        {0.2, 0.05, -0.10}
+    };
+
+    sarx::ProceduralLimpInput input;
+    input.cycle_phase = 0.25;
+    input.voxel_size = 0.045;
+    input.injured_hip = {-0.2, 0.9, 0.0};
+    input.injured_knee = {-0.2, 0.5, 0.0};
+    input.injured_ankle = {-0.2, 0.1, 0.0};
+
+    auto guarded = walk;
+    auto stiff = walk;
+    auto hop = walk;
+
+    const auto guarded_metrics =
+        sarx::apply_procedural_limp(
+            sarx::ProceduralLimpVariant::Guarded,
+            input,
+            voxels,
+            neutral,
+            guarded);
+
+    const auto stiff_metrics =
+        sarx::apply_procedural_limp(
+            sarx::ProceduralLimpVariant::StiffLeg,
+            input,
+            voxels,
+            neutral,
+            stiff);
+
+    const auto hop_metrics =
+        sarx::apply_procedural_limp(
+            sarx::ProceduralLimpVariant::HopStep,
+            input,
+            voxels,
+            neutral,
+            hop);
+
+    check(
+        guarded_metrics.injured_stride_scale
+            > stiff_metrics.injured_stride_scale
+            && stiff_metrics.injured_stride_scale
+                > hop_metrics.injured_stride_scale,
+        "limp variants should progressively unload the injured-side stride");
+
+    check(
+        hop_metrics.body_lift
+            > stiff_metrics.body_lift
+            && stiff_metrics.body_lift
+                > guarded_metrics.body_lift,
+        "hop-step should create the strongest vertical compensation");
+
+    check(
+        !sarx::nearly_equal(
+            guarded[2],
+            stiff[2],
+            1e-6)
+            && !sarx::nearly_equal(
+                stiff[2],
+                hop[2],
+                1e-6),
+        "three procedural limp variants should produce distinct injured-calf poses");
+}
+
 void test_humanoid_shoulder_cut_detaches_arm_cleanly() {
     auto fixture = sarx::build_humanoid_fixture();
     DamageSystem damage;
@@ -2077,6 +2196,7 @@ int main() {
     test_motion_recovery_selects_fall_without_rewriting_intent();
     test_grounded_recovery_selects_kneel_and_defers_locomotion();
     test_grounded_recovery_getup_requires_intact_biped();
+    test_foot_loss_prefers_limp_and_variants_are_distinct();
     test_humanoid_shoulder_cut_detaches_arm_cleanly();
 
     if (failures != 0) {
