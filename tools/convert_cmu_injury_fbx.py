@@ -5,7 +5,6 @@ import struct
 import sys
 from pathlib import Path
 
-
 BONE_MAP = {
     "hip": "pelvis",
     "abdomen": "spine_01",
@@ -37,14 +36,33 @@ CLIP_NAMES = {
 def clean_scene():
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
-    for datablocks in (
-        bpy.data.actions,
-        bpy.data.armatures,
-        bpy.data.meshes,
-        bpy.data.materials,
-    ):
-        # actions in use are handled after objects are removed.
-        pass
+
+    for action in list(bpy.data.actions):
+        bpy.data.actions.remove(action)
+
+def find_armature_with_bones(required_names):
+    required = set(required_names)
+
+    for obj in bpy.context.scene.objects:
+        if obj.type != "ARMATURE":
+            continue
+
+        names = {bone.name for bone in obj.data.bones}
+        if required.issubset(names):
+            return obj
+
+    raise RuntimeError(
+        "could not find armature containing required bones: "
+        + ",".join(sorted(required))
+    )
+
+def bone_depth(bone):
+    depth = 0
+    current = bone.parent
+    while current is not None:
+        depth += 1
+        current = current.parent
+    return depth
 
 def strip_non_rotation_animation_channels(glb_path: Path):
     data = glb_path.read_bytes()
@@ -61,20 +79,27 @@ def strip_non_rotation_animation_channels(glb_path: Path):
 
     json_start = 20
     json_end = json_start + json_length
-    document = json.loads(data[json_start:json_end].decode("utf-8").rstrip(" \t\r\n\x00"))
+    document = json.loads(
+        data[json_start:json_end]
+        .decode("utf-8")
+        .rstrip(" \t\r\n\x00")
+    )
 
     kept = 0
     removed = 0
+
     for animation in document.get("animations", []):
-        channels = animation.get("channels", [])
         filtered = []
-        for channel in channels:
+
+        for channel in animation.get("channels", []):
             path = channel.get("target", {}).get("path")
+
             if path == "rotation":
                 filtered.append(channel)
                 kept += 1
             else:
                 removed += 1
+
         animation["channels"] = filtered
 
     encoded = json.dumps(
@@ -82,6 +107,7 @@ def strip_non_rotation_animation_channels(glb_path: Path):
         separators=(",", ":"),
         ensure_ascii=False,
     ).encode("utf-8")
+
     encoded += b" " * ((4 - len(encoded) % 4) % 4)
 
     remainder = data[json_end:]
@@ -94,104 +120,246 @@ def strip_non_rotation_animation_channels(glb_path: Path):
     rebuilt += remainder
 
     glb_path.write_bytes(rebuilt)
+
     print("SARX_CMU_GLB_ROTATION_CHANNELS", kept)
     print("SARX_CMU_GLB_REMOVED_NONROTATION_CHANNELS", removed)
 
-
 def main():
     argv = sys.argv[sys.argv.index("--") + 1 :]
-    if len(argv) != 2:
-        raise RuntimeError("usage: blender --python convert_cmu_injury_fbx.py -- INPUT_FBX OUTPUT_GLB")
+
+    if len(argv) != 3:
+        raise RuntimeError(
+            "usage: blender --python convert_cmu_injury_fbx.py "
+            "-- SOURCE_FBX TARGET_CHARACTER_GLB OUTPUT_GLB"
+        )
 
     source = Path(argv[0]).resolve()
-    destination = Path(argv[1]).resolve()
+    target_character = Path(argv[1]).resolve()
+    destination = Path(argv[2]).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     clean_scene()
 
+    # Import the actual SARX Quaternius target rig first.
+    bpy.ops.import_scene.gltf(
+        filepath=str(target_character),
+    )
+
+    target_armature = find_armature_with_bones(
+        {"pelvis", "spine_01", "thigh_l", "calf_l", "foot_l"}
+    )
+
+    target_armature.name = "SARX_Quaternius_Target"
+
+    # The character fixture should contribute rest pose only.
+    if target_armature.animation_data is not None:
+        target_armature.animation_data_clear()
+
+    target_meshes = [
+        obj
+        for obj in bpy.context.scene.objects
+        if obj.type == "MESH"
+    ]
+
+    # Import the authored CMU motion and its source skeleton.
     bpy.ops.import_scene.fbx(
         filepath=str(source),
         use_anim=True,
         automatic_bone_orientation=False,
     )
 
-    armatures = [obj for obj in bpy.context.scene.objects if obj.type == "ARMATURE"]
-    if len(armatures) != 1:
-        raise RuntimeError(f"expected one armature in {source.name}, found {len(armatures)}")
+    source_armature = find_armature_with_bones(
+        {"hip", "abdomen", "rThigh", "rShin", "rFoot"}
+    )
 
-    armature = armatures[0]
-    bone_names = [bone.name for bone in armature.data.bones]
-    print("SARX_CMU_SOURCE_ARMATURE", source.name, armature.name)
-    print("SARX_CMU_SOURCE_BONES", "|".join(bone_names))
+    if source_armature == target_armature:
+        raise RuntimeError("source and target armatures resolved to the same object")
 
-    renamed = {}
+    source_action = (
+        source_armature.animation_data.action
+        if source_armature.animation_data is not None
+        else None
+    )
+
+    if source_action is None:
+        raise RuntimeError(f"{source.name} contains no source action")
+
+    source_bones = [bone.name for bone in source_armature.data.bones]
+    target_bones = [bone.name for bone in target_armature.data.bones]
+
+    print("SARX_CMU_SOURCE_ARMATURE", source.name, source_armature.name)
+    print("SARX_CMU_SOURCE_BONES", "|".join(source_bones))
+    print("SARX_QUATERNIUS_TARGET_BONES", "|".join(target_bones))
+
+    mapped = []
+
     for source_name, target_name in BONE_MAP.items():
-        bone = armature.data.bones.get(source_name)
-        if bone is None:
+        source_bone = source_armature.data.bones.get(source_name)
+        target_bone = target_armature.data.bones.get(target_name)
+
+        if source_bone is None or target_bone is None:
             continue
-        renamed[source_name] = target_name
-        bone.name = target_name
 
-    # Blender normally updates action RNA paths when bones are renamed, but
-    # enforce that rewrite explicitly so the exported glTF channels cannot
-    # silently retain the CMU names.
-    for action in bpy.data.actions:
-        for curve in action.fcurves:
-            for source_name, target_name in renamed.items():
-                old = f'pose.bones["{source_name}"]'
-                new = f'pose.bones["{target_name}"]'
-                if old in curve.data_path:
-                    curve.data_path = curve.data_path.replace(old, new)
-
-    target_names = [bone.name for bone in armature.data.bones if bone.name in BONE_MAP.values()]
-    print("SARX_CMU_RETARGETED_BONES", "|".join(sorted(target_names)))
-    if len(target_names) < 17:
-        raise RuntimeError(
-            f"CMU retarget mapped only {len(target_names)} major Quaternius bones"
+        source_rest_world = (
+            source_armature.matrix_world
+            @ source_bone.matrix_local
         )
 
-    # SARX owns world/root translation. The source FBXs use CMU translation
-    # units/rest offsets that are not compatible with the SARX Quaternius
-    # character. Preserve the authored joint rotations, but let the target
-    # character's own rest translations/scales remain authoritative.
-    removed_transform_curves = 0
-    for action in bpy.data.actions:
-        for curve in list(action.fcurves):
-            path = curve.data_path
-            if (
-                path == "location"
-                or path == "scale"
-                or path.endswith(".location")
-                or path.endswith(".scale")
-            ):
-                action.fcurves.remove(curve)
-                removed_transform_curves += 1
+        target_rest_world = (
+            target_armature.matrix_world
+            @ target_bone.matrix_local
+        )
 
-    print("SARX_CMU_REMOVED_TRANSLATION_SCALE_CURVES", removed_transform_curves)
+        orientation_offset = (
+            target_rest_world.to_quaternion()
+            @ source_rest_world.to_quaternion().inverted()
+        )
+        orientation_offset.normalize()
+
+        mapped.append(
+            (
+                source_name,
+                target_name,
+                orientation_offset,
+                bone_depth(target_bone),
+            )
+        )
+
+    mapped.sort(key=lambda item: item[3])
+
+    print(
+        "SARX_CMU_RETARGETED_BONES",
+        "|".join(sorted(target for _, target, _, _ in mapped)),
+    )
+
+    if len(mapped) < 17:
+        raise RuntimeError(
+            f"CMU retarget mapped only {len(mapped)} major Quaternius bones"
+        )
 
     clip_key = source.stem
-    clip_name = CLIP_NAMES.get(clip_key, f"CMU_{clip_key}")
+    clip_name = CLIP_NAMES.get(
+        clip_key,
+        f"CMU_{clip_key}",
+    )
 
-    actions = list(bpy.data.actions)
-    if not actions and armature.animation_data and armature.animation_data.action:
-        actions = [armature.animation_data.action]
+    target_action = bpy.data.actions.new(clip_name)
+    target_armature.animation_data_create()
+    target_armature.animation_data.action = target_action
 
-    if not actions:
-        raise RuntimeError(f"{source.name} contains no Blender actions")
+    for pose_bone in target_armature.pose.bones:
+        pose_bone.rotation_mode = "QUATERNION"
 
-    # Keep a single authored motion per output GLB and give it a stable semantic ID.
-    action = actions[0]
-    action.name = clip_name
-    if armature.animation_data is None:
-        armature.animation_data_create()
-    armature.animation_data.action = action
+    scene = bpy.context.scene
 
-    for other in list(bpy.data.actions):
-        if other != action:
-            bpy.data.actions.remove(other)
+    source_start = int(round(source_action.frame_range[0]))
+    source_end = int(round(source_action.frame_range[1]))
 
-    bpy.context.view_layer.objects.active = armature
-    armature.select_set(True)
+    if source_end <= source_start:
+        raise RuntimeError(
+            f"invalid source frame range {source_action.frame_range}"
+        )
+
+    print(
+        "SARX_CMU_SOURCE_TIMING",
+        source_start,
+        source_end,
+        scene.render.fps,
+        scene.render.fps_base,
+    )
+
+    target_world_inverse_rotation = (
+        target_armature.matrix_world
+        .to_quaternion()
+        .inverted()
+    )
+
+    # Bake the authored source pose into the actual Quaternius target
+    # coordinate frames.  Target bone translations/lengths remain those
+    # of the Quaternius rest skeleton; only rotations are keyed.
+    for frame in range(source_start, source_end + 1):
+        scene.frame_set(frame)
+
+        for source_name, target_name, orientation_offset, _ in mapped:
+            source_pose = source_armature.pose.bones.get(source_name)
+            target_pose = target_armature.pose.bones.get(target_name)
+            target_bone = target_armature.data.bones.get(target_name)
+
+            if (
+                source_pose is None
+                or target_pose is None
+                or target_bone is None
+            ):
+                continue
+
+            source_pose_world = (
+                source_armature.matrix_world
+                @ source_pose.matrix
+            )
+
+            desired_world_rotation = (
+                orientation_offset
+                @ source_pose_world.to_quaternion()
+            )
+            desired_world_rotation.normalize()
+
+            desired_armature_rotation = (
+                target_world_inverse_rotation
+                @ desired_world_rotation
+            )
+            desired_armature_rotation.normalize()
+
+            if target_bone.parent is not None:
+                parent_pose = target_armature.pose.bones[
+                    target_bone.parent.name
+                ]
+
+                rest_relative = (
+                    target_bone.parent.matrix_local.inverted()
+                    @ target_bone.matrix_local
+                )
+
+                base_matrix = (
+                    parent_pose.matrix
+                    @ rest_relative
+                )
+            else:
+                base_matrix = target_bone.matrix_local.copy()
+
+            desired_matrix = (
+                desired_armature_rotation
+                .to_matrix()
+                .to_4x4()
+            )
+
+            desired_matrix.translation = base_matrix.translation
+
+            target_pose.matrix = desired_matrix
+
+            target_pose.keyframe_insert(
+                data_path="rotation_quaternion",
+                frame=frame,
+                group=target_name,
+            )
+
+    # Preserve original timing. Blender's FBX importer sets scene FPS from
+    # the source file, so glTF timestamps remain in source seconds.
+    scene.frame_start = source_start
+    scene.frame_end = source_end
+
+    # Remove the source skeleton and any imported source meshes so export
+    # cannot accidentally include or target the CMU rig.
+    bpy.data.objects.remove(source_armature, do_unlink=True)
+
+    for obj in list(bpy.context.scene.objects):
+        if obj.type == "MESH" and obj not in target_meshes:
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    # Export only the target armature.  The SARX loader combines these
+    # animation nodes with assets/quaternius/character.glb by node name.
+    bpy.ops.object.select_all(action="DESELECT")
+    target_armature.select_set(True)
+    bpy.context.view_layer.objects.active = target_armature
 
     bpy.ops.export_scene.gltf(
         filepath=str(destination),
@@ -200,9 +368,18 @@ def main():
         export_animations=True,
         export_skins=True,
         export_yup=True,
+        export_force_sampling=False,
     )
 
     strip_non_rotation_animation_channels(destination)
+
+    print(
+        "SARX_CMU_BAKED_RETARGET",
+        clip_name,
+        len(mapped),
+        source_start,
+        source_end,
+    )
     print("SARX_CMU_EXPORTED", clip_name, destination)
 
 if __name__ == "__main__":
