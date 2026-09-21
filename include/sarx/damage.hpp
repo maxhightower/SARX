@@ -30,6 +30,7 @@ enum class DamageSource {
 
 enum class DamageCommandKind {
     Capsule,
+    PlaneCut,
     Sphere,
     Strain
 };
@@ -70,6 +71,14 @@ struct CapsuleDamage {
     Vec3 cut_normal{};
 };
 
+struct PlaneCutDamage {
+    Vec3 center{};
+    Vec3 normal{1.0, 0.0, 0.0};
+    double radius{0.1};
+    double energy{1.0};
+    DamageEventId event_id{0};
+};
+
 struct SphereDamage {
     Vec3 center{};
     double radius{0.1};
@@ -86,6 +95,7 @@ struct StrainDamage {
 struct DamageCommand {
     DamageCommandKind kind{DamageCommandKind::Capsule};
     CapsuleDamage capsule{};
+    PlaneCutDamage plane_cut{};
     SphereDamage sphere{};
     StrainDamage strain{};
 };
@@ -135,6 +145,10 @@ public:
         Body& body,
         const CapsuleDamage& damage,
         const DamageCandidates& candidates);
+
+    [[nodiscard]] DamageReport apply_plane_cut(
+        Body& body,
+        const PlaneCutDamage& damage);
 
     [[nodiscard]] DamageReport apply_sphere(Body& body, const SphereDamage& damage);
     [[nodiscard]] DamageReport apply_sphere(
