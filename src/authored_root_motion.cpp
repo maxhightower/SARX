@@ -111,13 +111,6 @@ void AuthoredRootMotionCurve::load_csv(
                     "authored root-motion time must be strictly increasing");
             }
 
-            if (sample.distance_m
-                + 1e-9
-                < next.back().distance_m) {
-
-                throw std::runtime_error(
-                    "authored root-motion distance must be monotonic");
-            }
         }
 
         next.push_back(sample);
