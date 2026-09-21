@@ -827,9 +827,9 @@ int main(int argc, char** argv) {
                     }
 
                     const std::string lowerarm_root =
-                        right_arm ? lowerarm_root : "lowerarm_l";
+                        right_arm ? "lowerarm_r" : "lowerarm_l";
                     const std::string hand_root =
-                        right_arm ? hand_root : "hand_l";
+                        right_arm ? "hand_r" : "hand_l";
 
                     const double previous_seconds =
                         static_cast<double>(frame - 1)
