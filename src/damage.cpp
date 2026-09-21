@@ -311,6 +311,26 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& input)
             broke);
     }
 
+    if (damage.mode == DamageMode::Cut && report.broken_count() > 0) {
+        Vec3 center{};
+        std::size_t broken = 0;
+        for (const auto& event : report.events) {
+            if (!event.broke) continue;
+            center += event.position;
+            ++broken;
+        }
+        if (broken > 0) {
+            center = center / static_cast<double>(broken);
+            wounds_.push_back(WoundDescriptor{
+                damage.event_id,
+                center,
+                normalized(damage.cut_normal),
+                damage.radius,
+                broken
+            });
+        }
+    }
+
     return report;
 }
 
@@ -514,6 +534,10 @@ std::vector<DamageReport> DamageSystem::replay(
 void DamageSystem::clear_history() {
     history_.clear();
     next_event_id_ = 1;
+}
+
+void DamageSystem::clear_wounds() {
+    wounds_.clear();
 }
 
 } // namespace sarx
