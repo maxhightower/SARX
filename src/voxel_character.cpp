@@ -873,6 +873,141 @@ VoxelizedCharacter::damage_cut_disk(
     return destroyed;
 }
 
+std::size_t
+VoxelizedCharacter::damage_anatomical_interface(
+    const std::string& distal_region,
+    const std::vector<std::string>& proximal_regions,
+    double damage) {
+
+    if (distal_region.empty()
+        || proximal_regions.empty()
+        || damage < 0.0) {
+        throw std::invalid_argument(
+            "invalid anatomical interface damage request");
+    }
+
+    std::unordered_map<
+        std::uint64_t,
+        std::size_t> grid;
+
+    grid.reserve(
+        voxels_.size() * 2);
+
+    for (std::size_t i = 0;
+         i < voxels_.size();
+         ++i) {
+
+        if (voxels_[i].state
+            != CharacterVoxelState::Attached) {
+            continue;
+        }
+
+        grid.emplace(
+            voxel_key(
+                voxels_[i].grid_x,
+                voxels_[i].grid_y,
+                voxels_[i].grid_z),
+            i);
+    }
+
+    constexpr int directions[6][3] = {
+        { 1,  0,  0},
+        {-1,  0,  0},
+        { 0,  1,  0},
+        { 0, -1,  0},
+        { 0,  0,  1},
+        { 0,  0, -1}
+    };
+
+    std::vector<std::size_t>
+        interface_voxels;
+
+    for (std::size_t i = 0;
+         i < voxels_.size();
+         ++i) {
+
+        const CharacterVoxel& voxel =
+            voxels_[i];
+
+        if (voxel.state
+                != CharacterVoxelState::Attached
+            || voxel.anatomical_region
+                != distal_region) {
+            continue;
+        }
+
+        bool interface = false;
+
+        for (const auto& direction
+             : directions) {
+
+            const int nx =
+                voxel.grid_x + direction[0];
+            const int ny =
+                voxel.grid_y + direction[1];
+            const int nz =
+                voxel.grid_z + direction[2];
+
+            if (nx < 0
+                || ny < 0
+                || nz < 0) {
+                continue;
+            }
+
+            const auto found =
+                grid.find(
+                    voxel_key(
+                        nx,
+                        ny,
+                        nz));
+
+            if (found == grid.end()) {
+                continue;
+            }
+
+            const CharacterVoxel& neighbor =
+                voxels_[found->second];
+
+            if (neighbor.state
+                    != CharacterVoxelState::Attached
+                || std::find(
+                    proximal_regions.begin(),
+                    proximal_regions.end(),
+                    neighbor.anatomical_region)
+                    == proximal_regions.end()) {
+                continue;
+            }
+
+            interface = true;
+            break;
+        }
+
+        if (interface) {
+            interface_voxels.push_back(i);
+        }
+    }
+
+    std::size_t destroyed = 0;
+
+    for (const std::size_t index
+         : interface_voxels) {
+
+        CharacterVoxel& voxel =
+            voxels_[index];
+
+        voxel.damage += damage;
+
+        if (voxel.damage
+            >= voxel.break_damage) {
+            voxel.state =
+                CharacterVoxelState::Destroyed;
+            ++destroyed;
+        }
+    }
+
+    return destroyed;
+}
+
 std::optional<DetachedVoxelComponent>
 VoxelizedCharacter::detach_anatomical_region_if_disconnected(
     const std::string& anatomical_region,
