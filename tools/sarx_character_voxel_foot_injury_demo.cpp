@@ -1,4 +1,5 @@
 #include "sarx/character_render.hpp"
+#include "sarx/authored_root_motion.hpp"
 #include "sarx/detached_articulation.hpp"
 #include "sarx/gltf_character.hpp"
 #include "sarx/motion_recovery.hpp"
@@ -26,6 +27,8 @@ struct Args {
     std::string clip{"Walk"};
     std::string injury_animations{"assets/cmu/CMU_HurtLegWalk.glb"};
     std::string injury_clip{"CMU_HurtLegWalk"};
+    std::string injury_root_motion{
+        "assets/cmu/CMU_HurtLegWalk.root.csv"};
     std::filesystem::path output{
         "media/raw/v13_quaternius_foot_authored_injury_frames"};
     int frames{240};
@@ -57,6 +60,8 @@ Args parse_args(int argc, char** argv) {
             args.injury_animations = argv[++i];
         } else if (value == "--injury-clip" && i + 1 < argc) {
             args.injury_clip = argv[++i];
+        } else if (value == "--injury-root-motion" && i + 1 < argc) {
+            args.injury_root_motion = argv[++i];
         } else if (value == "--output" && i + 1 < argc) {
             args.output = argv[++i];
         } else if (value == "--frames" && i + 1 < argc) {
@@ -86,6 +91,7 @@ Args parse_args(int argc, char** argv) {
                 << "sarx_character_voxel_foot_injury_demo"
                 << " [--injury-animations FILE]"
                 << " [--injury-clip NAME]"
+                << " [--injury-root-motion FILE]"
                 << " [--output DIR]"
                 << " [--frames N]"
                 << " [--cut-frame N]"
@@ -403,6 +409,12 @@ int main(int argc, char** argv) {
             args.character,
             args.injury_animations);
 
+        sarx::AuthoredRootMotionCurve
+            injury_root_motion;
+
+        injury_root_motion.load_csv(
+            args.injury_root_motion);
+
         const std::size_t clip =
             walk_character.find_animation(
                 args.clip);
@@ -493,6 +505,10 @@ int main(int argc, char** argv) {
         sarx::Vec3 transition_core_center{};
         sarx::Vec3 injury_initial_core_center{};
         sarx::Vec3 transition_lateral_axis{};
+        sarx::Vec3 inherited_root_velocity{};
+        sarx::Vec3 injury_hold_end_world_offset{};
+        sarx::Vec3 current_body_world_offset =
+            world_offset_for(0);
 
         double max_authored_pose_rms = 0.0;
         double max_floor_projection = 0.0;
@@ -503,7 +519,19 @@ int main(int argc, char** argv) {
         double min_facing_alignment =
             std::numeric_limits<double>::infinity();
 
+        double min_stump_center_y =
+            std::numeric_limits<double>::infinity();
+
+        double max_right_leg_cycle = 0.0;
+        double max_left_leg_cycle = 0.0;
+
+        sarx::Vec3 authored_reference_pelvis{};
+        sarx::Vec3 authored_reference_calf_r{};
+        sarx::Vec3 authored_reference_calf_l{};
+        bool have_authored_leg_reference = false;
+
         std::size_t right_support_contacts = 0;
+        std::size_t stump_near_ground_frames = 0;
         std::size_t authored_evaluated_frames = 0;
         std::size_t authored_grounded_frames = 0;
 
@@ -519,8 +547,13 @@ int main(int argc, char** argv) {
                 static_cast<double>(frame)
                 / args.fps;
 
-            const sarx::Vec3 world_offset =
+            const sarx::Vec3 scripted_world_offset =
                 world_offset_for(frame);
+
+            sarx::Vec3 world_offset =
+                normal_walk_authority
+                ? scripted_world_offset
+                : current_body_world_offset;
 
             auto voxel_centers =
                 voxel_character.sample_centers(
@@ -716,6 +749,9 @@ int main(int argc, char** argv) {
                          std::max(0, frame - 1)))
                     / dt;
 
+                inherited_root_velocity =
+                    physical_state.root_velocity;
+
                 physical_state.grounded = true;
                 physical_state.airborne = false;
                 physical_state.support_contacts = 1;
@@ -742,6 +778,15 @@ int main(int argc, char** argv) {
 
                     transition_world_offset =
                         world_offset;
+
+                    current_body_world_offset =
+                        world_offset;
+
+                    const double brake_seconds = 0.25;
+                    injury_hold_end_world_offset =
+                        transition_world_offset
+                        + inherited_root_velocity
+                            * (brake_seconds * 0.5);
 
                     auto core_centroid =
                         [&](const std::vector<sarx::Vec3>& centers) {
@@ -865,17 +910,60 @@ int main(int argc, char** argv) {
             if (injury_selected_frame >= 0
                 && frame > injury_selected_frame) {
 
-                const double injury_time =
+                const double handoff_time =
                     static_cast<double>(
                         frame - injury_selected_frame)
                     / args.fps;
+
+                const double startup_hold_seconds =
+                    0.25;
+
+                const double authored_time =
+                    std::max(
+                        0.0,
+                        handoff_time
+                            - startup_hold_seconds);
+
+                if (handoff_time
+                    <= startup_hold_seconds) {
+
+                    const double t =
+                        handoff_time;
+
+                    const double T =
+                        startup_hold_seconds;
+
+                    const double brake_distance_scale =
+                        t - (t * t)
+                            / (2.0 * T);
+
+                    current_body_world_offset =
+                        transition_world_offset
+                        + inherited_root_velocity
+                            * brake_distance_scale;
+                } else {
+                    const auto root_motion =
+                        injury_root_motion.sample(
+                            authored_time);
+
+                    current_body_world_offset =
+                        injury_hold_end_world_offset
+                        + sarx::Vec3{
+                            0.0,
+                            root_motion.vertical_m,
+                            root_motion.distance_m
+                        };
+                }
+
+                world_offset =
+                    current_body_world_offset;
 
                 auto injury_centers =
                     voxel_character.sample_centers(
                         injury_character,
                         injury_clip,
-                        injury_time,
-                        true,
+                        authored_time,
+                        false,
                         world_offset);
 
                 auto core_centroid =
@@ -947,7 +1035,7 @@ int main(int argc, char** argv) {
 
                 const double raw_blend =
                     std::clamp(
-                        injury_time / 0.30,
+                        handoff_time / 0.30,
                         0.0,
                         1.0);
 
@@ -1205,6 +1293,118 @@ int main(int argc, char** argv) {
                                     * transition_lateral_axis.z);
                     }
                 }
+
+                sarx::Vec3 pelvis_for_cycle{};
+                sarx::Vec3 calf_r_for_cycle{};
+                sarx::Vec3 calf_l_for_cycle{};
+
+                std::size_t pelvis_cycle_count = 0;
+                std::size_t calf_r_cycle_count = 0;
+                std::size_t calf_l_cycle_count = 0;
+
+                double stump_this_frame =
+                    std::numeric_limits<double>::infinity();
+
+                for (std::size_t i = 0;
+                     i < voxel_character.voxels().size();
+                     ++i) {
+
+                    const auto& voxel =
+                        voxel_character.voxels()[i];
+
+                    if (voxel.state
+                        != sarx::CharacterVoxelState::Attached) {
+                        continue;
+                    }
+
+                    if (voxel.anatomical_region
+                        == "pelvis") {
+                        pelvis_for_cycle += voxel_centers[i];
+                        ++pelvis_cycle_count;
+                    } else if (
+                        voxel.anatomical_region
+                        == "calf_r") {
+                        calf_r_for_cycle += voxel_centers[i];
+                        ++calf_r_cycle_count;
+                    } else if (
+                        voxel.anatomical_region
+                        == "calf_l") {
+                        calf_l_for_cycle += voxel_centers[i];
+                        ++calf_l_cycle_count;
+
+                        stump_this_frame =
+                            std::min(
+                                stump_this_frame,
+                                voxel_centers[i].y);
+                    }
+                }
+
+                if (std::isfinite(stump_this_frame)) {
+                    min_stump_center_y =
+                        std::min(
+                            min_stump_center_y,
+                            stump_this_frame);
+
+                    if (stump_this_frame
+                        <= args.voxel_size * 2.5) {
+                        ++stump_near_ground_frames;
+                    }
+                }
+
+                if (pelvis_cycle_count > 0
+                    && calf_r_cycle_count > 0
+                    && calf_l_cycle_count > 0) {
+
+                    pelvis_for_cycle =
+                        pelvis_for_cycle
+                        / static_cast<double>(
+                            pelvis_cycle_count);
+
+                    calf_r_for_cycle =
+                        calf_r_for_cycle
+                        / static_cast<double>(
+                            calf_r_cycle_count);
+
+                    calf_l_for_cycle =
+                        calf_l_for_cycle
+                        / static_cast<double>(
+                            calf_l_cycle_count);
+
+                    const sarx::Vec3 relative_r =
+                        calf_r_for_cycle
+                        - pelvis_for_cycle;
+
+                    const sarx::Vec3 relative_l =
+                        calf_l_for_cycle
+                        - pelvis_for_cycle;
+
+                    if (!have_authored_leg_reference) {
+                        authored_reference_pelvis =
+                            pelvis_for_cycle;
+
+                        authored_reference_calf_r =
+                            relative_r;
+
+                        authored_reference_calf_l =
+                            relative_l;
+
+                        have_authored_leg_reference = true;
+                    } else {
+                        max_right_leg_cycle =
+                            std::max(
+                                max_right_leg_cycle,
+                                sarx::length(
+                                    relative_r
+                                    - authored_reference_calf_r));
+
+                        max_left_leg_cycle =
+                            std::max(
+                                max_left_leg_cycle,
+                                sarx::length(
+                                    relative_l
+                                    - authored_reference_calf_l));
+                    }
+                }
             }
 
             sarx::CharacterMeshFrame visible =
@@ -1363,6 +1563,25 @@ int main(int argc, char** argv) {
                     authored_evaluated_frames));
         }
 
+        if (args.require_limp
+            && max_right_leg_cycle
+                < args.voxel_size * 0.75) {
+            throw std::runtime_error(
+                "authored injury locomotion has insufficient intact-leg cycling: "
+                + std::to_string(
+                    max_right_leg_cycle));
+        }
+
+        if (args.require_limp
+            && (!std::isfinite(
+                    min_stump_center_y)
+                || stump_near_ground_frames == 0)) {
+            throw std::runtime_error(
+                "amputation stump never approaches the ground: "
+                + std::to_string(
+                    min_stump_center_y));
+        }
+
         if (args.require_isolated_foot
             && unrelated_changed_voxels != 0) {
             throw std::runtime_error(
@@ -1433,6 +1652,16 @@ int main(int argc, char** argv) {
             << min_head_above_pelvis
             << " min_facing_alignment="
             << min_facing_alignment
+            << " min_stump_center_y="
+            << min_stump_center_y
+            << " stump_near_ground_frames="
+            << stump_near_ground_frames
+            << " max_right_leg_cycle="
+            << max_right_leg_cycle
+            << " max_left_leg_cycle="
+            << max_left_leg_cycle
+            << " authored_root_distance_m="
+            << injury_root_motion.total_distance_m()
             << " max_authored_pose_rms="
             << max_authored_pose_rms
             << " max_floor_projection="
