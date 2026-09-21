@@ -35,6 +35,13 @@ struct AnatomicalSubstitution {
     std::size_t minimum_count{1};
 };
 
+struct AnatomicalAlternativeChain {
+    std::string label;
+    std::vector<std::vector<AnatomicalRequirement>>
+        alternatives;
+    std::size_t minimum_complete_alternatives{1};
+};
+
 struct MotionCapability {
     std::string motion_id;
     std::string semantic_intent;
@@ -49,6 +56,9 @@ struct MotionCapability {
 
     std::vector<AnatomicalSubstitution>
         allowed_substitutions;
+
+    std::vector<AnatomicalAlternativeChain>
+        alternative_chains;
 
     std::size_t minimum_support_contacts{};
     bool requires_grounded{false};
