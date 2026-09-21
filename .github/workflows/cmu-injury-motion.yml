@@ -61,7 +61,7 @@ jobs:
               2>&1 | tee "build/cmu-logs/${semantic}-blender.log"
           done
 
-          sha256sum assets/cmu/*.glb | tee assets/cmu/generated-sha256.txt
+          sha256sum assets/cmu/*.glb assets/cmu/*.root.csv | tee assets/cmu/generated-sha256.txt
 
       - name: Configure SARX
         run: cmake -S . -B build/cmu-sarx -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add assets/cmu/*.glb assets/cmu/generated-sha256.txt
+          git add assets/cmu/*.glb assets/cmu/*.root.csv assets/cmu/generated-sha256.txt
 
           if git diff --cached --quiet; then
             echo "CMU injury animations already vendored and unchanged."
@@ -107,6 +107,7 @@ jobs:
           name: sarx-cmu-injury-motion-compatibility
           path: |
             assets/cmu/*.glb
+            assets/cmu/*.root.csv
             assets/cmu/generated-sha256.txt
             build/cmu-logs/
             build/cmu-validation/
