@@ -66,3 +66,14 @@ also requires an upright head-over-pelvis relationship and sustained intact-foot
 support after the authored transition.
 
 The authored CMU hip/root rotation is intentionally not transferred; SARX preserves the agent's existing world-facing direction across the injury-motion handoff.
+
+
+### Root-motion extraction
+
+Post-injury world travel is no longer a fixed SARX translation. The vendor
+pipeline measures CMU hip/root travel, detects and removes the FBX
+bind-to-motion discontinuity, normalizes source units by measured source-vs-
+Quaternius skeleton height, smooths the horizontal path over a short window,
+and exports cumulative path length plus vertical displacement as a
+`.root.csv` sidecar. Runtime applies a short post-severance deceleration
+before authored root travel begins.
