@@ -1,6 +1,7 @@
 #include "sarx/body.hpp"
 #include "sarx/damage.hpp"
 #include "sarx/broad_phase.hpp"
+#include "sarx/volume.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -520,6 +521,135 @@ void test_broad_phase_matches_full_scan() {
     }
 }
 
+
+void test_voxel_lattice_generation() {
+    sarx::VoxelLatticeSpec spec;
+    spec.origin = {0.0, 0.0, 0.0};
+    spec.nx = 3;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.5;
+    spec.include_diagonals = false;
+    spec.default_material = 1;
+
+    sarx::MaterialRegion right_side;
+    right_side.min = {0.75, -1.0, -1.0};
+    right_side.max = {2.0, 2.0, 2.0};
+    right_side.material = 5;
+    right_side.priority = 10;
+
+    auto lattice = sarx::build_voxel_lattice(spec, {right_side});
+
+    check(lattice.particle_count() == 27,
+          "3x3x3 lattice should generate 27 particles");
+    check(lattice.body.structural_constraints().size() == 54,
+          "3x3x3 axial lattice should generate 54 unique neighbor links");
+
+    check(lattice.particle(2, 1, 1) == 14,
+          "lattice index mapping should remain deterministic");
+    check(lattice.particle_materials[lattice.particle(2, 1, 1)] == 5,
+          "particle material region should override default material");
+
+    bool found_region_constraint = false;
+    for (const auto& constraint : lattice.body.structural_constraints()) {
+        if (constraint.material == 5) {
+            found_region_constraint = true;
+            break;
+        }
+    }
+    check(found_region_constraint,
+          "constraint midpoint should inherit material-region assignment");
+}
+
+void test_voxel_lattice_diagonal_connectivity() {
+    sarx::VoxelLatticeSpec axial;
+    axial.nx = 3;
+    axial.ny = 3;
+    axial.nz = 3;
+    axial.spacing = 0.5;
+    axial.include_diagonals = false;
+
+    sarx::VoxelLatticeSpec isotropic = axial;
+    isotropic.include_diagonals = true;
+
+    const auto axial_lattice = sarx::build_voxel_lattice(axial);
+    const auto isotropic_lattice = sarx::build_voxel_lattice(isotropic);
+
+    check(isotropic_lattice.body.structural_constraints().size()
+              > axial_lattice.body.structural_constraints().size(),
+          "diagonal lattice mode should add shear/body-diagonal support");
+}
+
+void test_automatic_bone_embedding() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 3;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.5;
+    spec.include_diagonals = false;
+
+    auto lattice = sarx::build_voxel_lattice(spec);
+
+    const Vec3 center{0.5, 0.5, 0.5};
+    const auto embedded = sarx::embed_bone(
+        lattice,
+        sarx::kNoParent,
+        center,
+        0.51,
+        1e-8,
+        1.0,
+        3);
+
+    check(embedded.bone == 0,
+          "first embedded bone should receive deterministic bone ID zero");
+    check(embedded.attachments.size() == 7,
+          "radius 0.51 should attach center plus six axial neighbors");
+    check(lattice.body.bones().size() == 1,
+          "bone embedding should add the rig bone to the physical body");
+
+    for (const auto attachment_id : embedded.attachments) {
+        const auto& attachment = lattice.body.attachments()[attachment_id];
+        const Vec3 particle_position =
+            lattice.body.particles()[attachment.particle].position;
+        const Vec3 reconstructed =
+            lattice.body.bones()[embedded.bone].animated_position
+            + attachment.local_offset;
+
+        check(sarx::nearly_equal(particle_position, reconstructed),
+              "embedded attachment offset should reconstruct its particle rest pose");
+    }
+}
+
+void test_embedded_child_bone_uses_rig_parent() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 5;
+    spec.ny = 2;
+    spec.nz = 2;
+    spec.spacing = 0.5;
+    spec.include_diagonals = false;
+
+    auto lattice = sarx::build_voxel_lattice(spec);
+
+    const auto root = sarx::embed_bone(
+        lattice,
+        sarx::kNoParent,
+        {0.5, 0.25, 0.25},
+        0.8);
+
+    const auto child = sarx::embed_bone(
+        lattice,
+        root.bone,
+        {1.5, 0.25, 0.25},
+        0.8);
+
+    check(lattice.body.bones()[child.bone].parent == root.bone,
+          "embedded child bone should preserve requested rig parent");
+    check(lattice.body.bone_root_connected(child.bone),
+          "embedded child should initially inherit root animation authority");
+    check(!child.attachments.empty(),
+          "embedded child should automatically capture nearby physical particles");
+}
+
 } // namespace
 
 int main() {
@@ -536,12 +666,16 @@ int main() {
     test_damage_history_replays_deterministically();
     test_persistent_wound_descriptor();
     test_broad_phase_matches_full_scan();
+    test_voxel_lattice_generation();
+    test_voxel_lattice_diagonal_connectivity();
+    test_automatic_bone_embedding();
+    test_embedded_child_bone_uses_rig_parent();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
         return EXIT_FAILURE;
     }
 
-    std::cout << "SARX V0.3 core tests passed.\n";
+    std::cout << "SARX V0.4A tests passed.\n";
     return EXIT_SUCCESS;
 }
