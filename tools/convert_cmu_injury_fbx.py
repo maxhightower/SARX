@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 BONE_MAP = {
-    "hip": "pelvis",
     "abdomen": "spine_01",
     "chest": "spine_03",
     "neck": "neck_01",
@@ -283,8 +282,13 @@ def main():
     )
 
     # Bake the authored source pose into the actual Quaternius target
-    # coordinate frames.  Target bone translations/lengths remain those
+    # coordinate frames. Target bone translations/lengths remain those
     # of the Quaternius rest skeleton; only rotations are keyed.
+    #
+    # Deliberately do NOT transfer the CMU hip/root rotation to Quaternius
+    # pelvis. CMU root orientation contains capture heading/root motion.
+    # SARX owns world facing and continuity, so authored injury clips may
+    # animate the spine and limbs but may not silently rotate the agent.
     for frame in range(source_start, source_end + 1):
         scene.frame_set(frame)
 
