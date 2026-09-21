@@ -16,6 +16,7 @@ add_library(sarx
     src/character_render.cpp
     src/voxel_character.cpp
     src/motion_viability.cpp
+    src/detached_articulation.cpp
 )
 
 target_include_directories(sarx
