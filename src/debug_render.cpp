@@ -254,27 +254,30 @@ void write_debug_ppm(
                 continue;
             }
 
-            if (bone.joint_to_parent_active) {
-                draw_segment(
-                    canvas,
-                    projector,
-                    body.bones()[bone.parent].animated_position,
-                    bone.animated_position,
-                    {45, 104, 196},
-                    3);
-            } else {
-                const Vec3 break_point =
-                    (body.bones()[bone.parent].animated_position
-                     + bone.animated_position) * 0.5;
-                const auto point = projector.project(break_point);
-                if (point.valid) {
-                    canvas.ring(
-                        static_cast<int>(std::lround(point.x)),
-                        static_cast<int>(std::lround(point.y)),
-                        7,
-                        {210, 55, 55});
+            if (!body.bone_root_connected(id)) {
+                if (!bone.joint_to_parent_active) {
+                    const Vec3 break_point =
+                        (body.bones()[bone.parent].animated_position
+                         + bone.animated_position) * 0.5;
+                    const auto point = projector.project(break_point);
+                    if (point.valid) {
+                        canvas.ring(
+                            static_cast<int>(std::lround(point.x)),
+                            static_cast<int>(std::lround(point.y)),
+                            7,
+                            {210, 55, 55});
+                    }
                 }
+                continue;
             }
+
+            draw_segment(
+                canvas,
+                projector,
+                body.bones()[bone.parent].animated_position,
+                bone.animated_position,
+                {45, 104, 196},
+                3);
         }
     }
 
