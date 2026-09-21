@@ -94,6 +94,13 @@ MotionCandidateScore score_grounded_candidate(
             : 0.72;
         break;
 
+    case MotionStrategy::Limp:
+        candidate.intent_preservation =
+            intent == BehavioralIntent::MoveForward
+            ? 0.96
+            : 0.52;
+        break;
+
     case MotionStrategy::Crawl:
         candidate.intent_preservation =
             intent == BehavioralIntent::MoveForward
@@ -436,6 +443,108 @@ GroundedRecoveryPlan plan_grounded_recovery(
     return plan;
 }
 
+MotionRecoveryPlan plan_locomotion_replacement(
+    BehavioralIntent intent,
+    const std::string& current_motion,
+    const std::vector<AnatomicalAvailability>& anatomy,
+    const MotionPhysicalState& physical_state) {
+
+    MotionRecoveryPlan plan;
+    plan.motion_id = current_motion;
+
+    MotionPhysicalContext context;
+    context.has_support_contacts = true;
+    context.support_contacts =
+        physical_state.support_contacts;
+    context.has_grounded_state = true;
+    context.grounded =
+        physical_state.grounded;
+
+    plan.current_viability =
+        evaluate_motion_viability(
+            current_motion,
+            anatomy,
+            context);
+
+    if (plan.current_viability.state
+        != MotionViability::Invalid) {
+        return plan;
+    }
+
+    plan.transition_required = true;
+
+    if (evaluate_motion_viability(
+            "ProceduralLimp",
+            anatomy,
+            context).state
+        != MotionViability::Invalid) {
+
+        plan.candidates.push_back(
+            score_grounded_candidate(
+                MotionStrategy::Limp,
+                "ProceduralLimp",
+                true,
+                intent,
+                0.92,
+                0.90));
+    }
+
+    if (evaluate_motion_viability(
+            "ProceduralHop",
+            anatomy,
+            context).state
+        != MotionViability::Invalid) {
+
+        plan.candidates.push_back(
+            score_grounded_candidate(
+                MotionStrategy::Hop,
+                "ProceduralHop",
+                true,
+                intent,
+                0.82,
+                0.62));
+    }
+
+    if (evaluate_motion_viability(
+            "ProceduralCrawl",
+            anatomy,
+            context).state
+        != MotionViability::Invalid) {
+
+        plan.candidates.push_back(
+            score_grounded_candidate(
+                MotionStrategy::Crawl,
+                "ProceduralCrawl",
+                true,
+                intent,
+                0.70,
+                0.40));
+    }
+
+    const auto best =
+        std::max_element(
+            plan.candidates.begin(),
+            plan.candidates.end(),
+            [](const MotionCandidateScore& a,
+               const MotionCandidateScore& b) {
+                return a.total < b.total;
+            });
+
+    if (best == plan.candidates.end()) {
+        plan.strategy = MotionStrategy::Stop;
+        plan.motion_id = "Stop";
+        plan.procedural = true;
+        return plan;
+    }
+
+    plan.strategy = best->strategy;
+    plan.motion_id = best->motion_id;
+    plan.procedural = best->procedural;
+    plan.score = best->total;
+
+    return plan;
+}
+
 const char* motion_strategy_name(
     MotionStrategy strategy) {
 
@@ -450,6 +559,8 @@ const char* motion_strategy_name(
         return "Prone";
     case MotionStrategy::GetUp:
         return "GetUp";
+    case MotionStrategy::Limp:
+        return "Limp";
     case MotionStrategy::Hop:
         return "Hop";
     case MotionStrategy::Crawl:
