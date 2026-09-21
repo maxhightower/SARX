@@ -1,5 +1,6 @@
 #include "sarx/body.hpp"
 #include "sarx/damage.hpp"
+#include "sarx/broad_phase.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -430,6 +431,95 @@ void test_damage_history_replays_deterministically() {
     }
 }
 
+
+void test_persistent_wound_descriptor() {
+    Body body;
+    DamageSystem damage;
+
+    const auto p0 = body.add_particle({-1.0, 0.0, 0.0});
+    const auto p1 = body.add_particle({1.0, 0.0, 0.0});
+    body.add_structural_constraint(p0, p1);
+
+    CapsuleDamage blade;
+    blade.a = {0.0, -1.0, 0.0};
+    blade.b = {0.0, 1.0, 0.0};
+    blade.radius = 0.1;
+    blade.energy = 1.2;
+    blade.mode = DamageMode::Cut;
+    blade.event_id = 500;
+    blade.cut_normal = {0.0, 0.0, 1.0};
+
+    const auto report = damage.apply_capsule(body, blade);
+
+    check(report.broken_count() == 1,
+          "wound fixture should produce one fracture");
+    check(damage.wounds().size() == 1,
+          "successful cut should create one persistent wound descriptor");
+
+    if (!damage.wounds().empty()) {
+        const auto& wound = damage.wounds()[0];
+        check(wound.event_id == 500,
+              "wound should retain authoritative damage event ID");
+        check(sarx::nearly_equal(wound.normal, {0.0, 0.0, 1.0}),
+              "wound should preserve normalized cut-surface normal");
+        check(wound.broken_target_count == 1,
+              "wound should record how many authoritative targets failed");
+    }
+
+    damage.clear_wounds();
+    check(damage.wounds().empty(),
+          "wound history should be independently clearable");
+}
+
+void test_broad_phase_matches_full_scan() {
+    Body indexed_body;
+
+    for (int i = 0; i < 64; ++i) {
+        const double x = static_cast<double>(i) * 4.0;
+        const auto a = indexed_body.add_particle({x, 0.0, 0.0});
+        const auto b = indexed_body.add_particle({x + 1.0, 0.0, 0.0});
+        indexed_body.add_structural_constraint(a, b);
+    }
+
+    Body full_scan_body = indexed_body;
+
+    SphereDamage impact;
+    impact.center = {0.5, 0.0, 0.0};
+    impact.radius = 0.3;
+    impact.energy = 1.2;
+    impact.mode = DamageMode::Blunt;
+    impact.event_id = 700;
+
+    sarx::DamageBroadPhase broad_phase;
+    broad_phase.rebuild(indexed_body, 1.0);
+    const auto query = broad_phase.query_sphere(impact);
+
+    check(broad_phase.indexed_primitives() == 64,
+          "broad phase should index each active structural primitive");
+    check(query.candidates.size() < broad_phase.indexed_primitives() / 4,
+          "localized query should reject most distant constraints before exact testing");
+
+    DamageSystem indexed_damage;
+    DamageSystem full_damage;
+
+    const auto indexed_report =
+        indexed_damage.apply_sphere(indexed_body, impact, query.candidates);
+    const auto full_report =
+        full_damage.apply_sphere(full_scan_body, impact);
+
+    check(indexed_report.broken_count() == full_report.broken_count(),
+          "broad-phase and full-scan paths should report the same break count");
+
+    for (std::size_t i = 0; i < indexed_body.structural_constraints().size(); ++i) {
+        const auto& lhs = indexed_body.structural_constraints()[i];
+        const auto& rhs = full_scan_body.structural_constraints()[i];
+        check(lhs.active == rhs.active,
+              "broad-phase routing must preserve exact topology outcome");
+        check(std::abs(lhs.damage - rhs.damage) < 1e-12,
+              "broad-phase routing must preserve exact accumulated damage");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -444,6 +534,8 @@ int main() {
     test_strain_driven_brittle_fracture();
     test_progressive_strain_damage();
     test_damage_history_replays_deterministically();
+    test_persistent_wound_descriptor();
+    test_broad_phase_matches_full_scan();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
