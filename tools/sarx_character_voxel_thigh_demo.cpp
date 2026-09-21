@@ -38,6 +38,7 @@ struct Args {
     bool require_stable_camera{false};
     bool require_articulated_leg{false};
     bool require_fall_transition{false};
+    bool require_grounded_recovery{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -78,6 +79,8 @@ Args parse_args(int argc, char** argv) {
             args.require_articulated_leg = true;
         } else if (value == "--require-fall-transition") {
             args.require_fall_transition = true;
+        } else if (value == "--require-grounded-recovery") {
+            args.require_grounded_recovery = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_voxel_thigh_demo"
@@ -96,7 +99,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--require-anatomical-isolation]"
                 << " [--require-stable-camera]"
                 << " [--require-articulated-leg]"
-                << " [--require-fall-transition]\n";
+                << " [--require-fall-transition]"
+                << " [--require-grounded-recovery]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -480,6 +484,31 @@ int main(int argc, char** argv) {
         int recovery_selected_frame = -1;
         int recovery_completed_frame = -1;
 
+        sarx::GroundedRecoveryPlan
+            grounded_recovery_plan;
+
+        bool grounded_recovery_planned = false;
+        std::optional<std::size_t> grounded_recovery_clip;
+        std::vector<sarx::Vec3>
+            grounded_recovery_source_centers;
+
+        sarx::Vec3 grounded_recovery_start_world_offset{};
+        sarx::Vec3 grounded_recovery_world_offset{};
+        sarx::Vec3 grounded_recovery_root_velocity{};
+        sarx::Vec3 grounded_inherited_root_velocity{};
+
+        double grounded_recovery_time_seconds = 0.0;
+        double grounded_velocity_discontinuity = 0.0;
+        double max_grounded_pose_rms = 0.0;
+        double grounded_centroid_rise = 0.0;
+
+        std::size_t fall_body_ground_contacts = 0;
+        double fall_body_min_y =
+            std::numeric_limits<double>::infinity();
+
+        int grounded_recovery_selected_frame = -1;
+        int grounded_pose_engaged_frame = -1;
+
         std::optional<DetachedLeg>
             detached_leg;
 
@@ -848,6 +877,7 @@ int main(int argc, char** argv) {
                 world_offset;
 
             if (recovery_clip
+                && !grounded_recovery_clip
                 && frame > recovery_selected_frame) {
 
                 const sarx::Vec3 previous_offset =
@@ -1002,6 +1032,240 @@ int main(int argc, char** argv) {
                     recovery_completed_frame =
                         frame;
                 }
+            }
+
+            if (recovery_completed_frame >= 0
+                && !grounded_recovery_planned) {
+
+                for (std::size_t i = 0;
+                     i < voxel_centers.size();
+                     ++i) {
+
+                    if (voxel_character
+                            .voxels()[i]
+                            .state
+                        != sarx::CharacterVoxelState::Attached) {
+                        continue;
+                    }
+
+                    fall_body_min_y =
+                        std::min(
+                            fall_body_min_y,
+                            voxel_centers[i].y);
+
+                    if (voxel_centers[i].y
+                        <= args.voxel_size * 0.80) {
+                        ++fall_body_ground_contacts;
+                    }
+                }
+
+                sarx::MotionPhysicalState
+                    grounded_physical_state;
+
+                grounded_physical_state.root_velocity =
+                    recovery_root_velocity;
+
+                grounded_physical_state.grounded =
+                    fall_body_ground_contacts > 0
+                    || fall_body_min_y
+                        <= args.voxel_size * 1.20;
+
+                grounded_physical_state.airborne =
+                    !grounded_physical_state.grounded;
+
+                grounded_physical_state.support_contacts =
+                    fall_body_ground_contacts;
+
+                grounded_recovery_plan =
+                    sarx::plan_grounded_recovery(
+                        sarx::BehavioralIntent::MoveForward,
+                        sarx::GroundedPosture::Prone,
+                        character.animation_names(),
+                        voxel_character.anatomy_availability(),
+                        grounded_physical_state);
+
+                grounded_recovery_planned = true;
+
+                if (grounded_recovery_plan.transition_required
+                    && grounded_recovery_plan.strategy
+                        == sarx::MotionStrategy::Kneel
+                    && !grounded_recovery_plan.procedural) {
+
+                    grounded_recovery_clip =
+                        character.find_animation(
+                            grounded_recovery_plan.motion_id);
+
+                    grounded_recovery_source_centers =
+                        voxel_centers;
+
+                    grounded_recovery_start_world_offset =
+                        body_world_offset;
+
+                    grounded_recovery_world_offset =
+                        body_world_offset;
+
+                    grounded_inherited_root_velocity =
+                        recovery_root_velocity;
+
+                    grounded_recovery_root_velocity =
+                        grounded_inherited_root_velocity;
+
+                    grounded_recovery_selected_frame =
+                        frame;
+                }
+            }
+
+            if (grounded_recovery_clip
+                && frame
+                    > grounded_recovery_selected_frame) {
+
+                const sarx::Vec3 previous_offset =
+                    grounded_recovery_world_offset;
+
+                grounded_recovery_world_offset +=
+                    grounded_recovery_root_velocity
+                    * dt;
+
+                if (frame
+                    == grounded_recovery_selected_frame + 1) {
+
+                    const sarx::Vec3 realized_velocity =
+                        (grounded_recovery_world_offset
+                         - previous_offset)
+                        / dt;
+
+                    grounded_velocity_discontinuity =
+                        sarx::length(
+                            realized_velocity
+                            - grounded_inherited_root_velocity);
+                }
+
+                const double settle_damping =
+                    std::exp(
+                        -4.0 * dt);
+
+                grounded_recovery_root_velocity.x *=
+                    settle_damping;
+
+                grounded_recovery_root_velocity.z *=
+                    settle_damping;
+
+                grounded_recovery_time_seconds +=
+                    dt;
+
+                auto kneeling_centers =
+                    voxel_character.sample_centers(
+                        character,
+                        *grounded_recovery_clip,
+                        grounded_recovery_time_seconds,
+                        true,
+                        grounded_recovery_world_offset);
+
+                const double raw_blend =
+                    std::clamp(
+                        grounded_recovery_time_seconds
+                            / 0.38,
+                        0.0,
+                        1.0);
+
+                const double blend =
+                    raw_blend
+                    * raw_blend
+                    * (3.0 - 2.0 * raw_blend);
+
+                const sarx::Vec3 world_delta =
+                    grounded_recovery_world_offset
+                    - grounded_recovery_start_world_offset;
+
+                double pose_error_squared = 0.0;
+                std::size_t pose_count = 0;
+
+                sarx::Vec3 source_centroid{};
+                sarx::Vec3 current_centroid{};
+                std::size_t centroid_count = 0;
+
+                for (std::size_t i = 0;
+                     i < voxel_centers.size();
+                     ++i) {
+
+                    const sarx::Vec3 carried_source =
+                        grounded_recovery_source_centers[i]
+                        + world_delta;
+
+                    voxel_centers[i] =
+                        carried_source
+                        * (1.0 - blend)
+                        + kneeling_centers[i]
+                        * blend;
+
+                    if (voxel_character
+                            .voxels()[i]
+                            .state
+                        != sarx::CharacterVoxelState::Attached) {
+                        continue;
+                    }
+
+                    const sarx::Vec3 local_source =
+                        grounded_recovery_source_centers[i]
+                        - grounded_recovery_start_world_offset;
+
+                    const sarx::Vec3 local_current =
+                        voxel_centers[i]
+                        - grounded_recovery_world_offset;
+
+                    const sarx::Vec3 delta =
+                        local_current
+                        - local_source;
+
+                    pose_error_squared +=
+                        sarx::length_squared(
+                            delta);
+
+                    ++pose_count;
+                    source_centroid +=
+                        local_source;
+                    current_centroid +=
+                        local_current;
+                    ++centroid_count;
+                }
+
+                if (pose_count > 0) {
+                    max_grounded_pose_rms =
+                        std::max(
+                            max_grounded_pose_rms,
+                            std::sqrt(
+                                pose_error_squared
+                                / static_cast<double>(
+                                    pose_count)));
+                }
+
+                if (centroid_count > 0) {
+                    source_centroid =
+                        source_centroid
+                        / static_cast<double>(
+                            centroid_count);
+
+                    current_centroid =
+                        current_centroid
+                        / static_cast<double>(
+                            centroid_count);
+
+                    grounded_centroid_rise =
+                        std::max(
+                            grounded_centroid_rise,
+                            current_centroid.y
+                            - source_centroid.y);
+                }
+
+                if (raw_blend >= 1.0
+                    && grounded_pose_engaged_frame < 0) {
+
+                    grounded_pose_engaged_frame =
+                        frame;
+                }
+
+                body_world_offset =
+                    grounded_recovery_world_offset;
             }
 
             if (detached_leg
@@ -1203,6 +1467,48 @@ int main(int argc, char** argv) {
                 "fall transition did not visibly leave the frozen Walk pose");
         }
 
+        if (args.require_grounded_recovery
+            && (!grounded_recovery_planned
+                || fall_body_ground_contacts == 0)) {
+            throw std::runtime_error(
+                "fall did not establish measured attached-body ground contact");
+        }
+
+        if (args.require_grounded_recovery
+            && (grounded_recovery_selected_frame < 0
+                || grounded_recovery_plan.strategy
+                    != sarx::MotionStrategy::Kneel
+                || grounded_recovery_plan.target_posture
+                    != sarx::GroundedPosture::Kneeling
+                || grounded_recovery_plan.procedural
+                || grounded_recovery_plan.motion_id.empty())) {
+            throw std::runtime_error(
+                "grounded recovery did not select authored kneeling");
+        }
+
+        if (args.require_grounded_recovery
+            && grounded_recovery_selected_frame
+                < recovery_completed_frame) {
+            throw std::runtime_error(
+                "grounded recovery started before the fall completed");
+        }
+
+        if (args.require_grounded_recovery
+            && grounded_velocity_discontinuity > 1e-9) {
+            throw std::runtime_error(
+                "grounded recovery failed to preserve handoff velocity: "
+                + std::to_string(
+                    grounded_velocity_discontinuity));
+        }
+
+        if (args.require_grounded_recovery
+            && (grounded_pose_engaged_frame < 0
+                || max_grounded_pose_rms
+                    < args.voxel_size * 1.5)) {
+            throw std::runtime_error(
+                "grounded recovery never visibly left the prone fall pose");
+        }
+
         std::cout
             << "SARX Quaternius voxel thigh cut demo complete:"
             << " total_voxels="
@@ -1238,6 +1544,33 @@ int main(int argc, char** argv) {
             << fall_centroid_drop
             << " fall_pose_rms="
             << max_fall_pose_rms
+            << " fall_body_ground_contacts="
+            << fall_body_ground_contacts
+            << " fall_body_min_y="
+            << fall_body_min_y
+            << " grounded_recovery_selected_frame="
+            << grounded_recovery_selected_frame
+            << " grounded_pose_engaged_frame="
+            << grounded_pose_engaged_frame
+            << " grounded_strategy="
+            << sarx::motion_strategy_name(
+                grounded_recovery_plan.strategy)
+            << " grounded_motion="
+            << (grounded_recovery_plan.motion_id.empty()
+                ? std::string{"none"}
+                : grounded_recovery_plan.motion_id)
+            << " grounded_procedural="
+            << (grounded_recovery_plan.procedural ? 1 : 0)
+            << " grounded_velocity_discontinuity="
+            << grounded_velocity_discontinuity
+            << " grounded_pose_rms="
+            << max_grounded_pose_rms
+            << " grounded_centroid_rise="
+            << grounded_centroid_rise
+            << " grounded_followup_options="
+            << grounded_recovery_plan
+                   .followup_locomotion_options
+                   .size()
             << " left_thigh_attached_fraction="
             << voxel_character.attached_fraction(
                 "thigh_l")
