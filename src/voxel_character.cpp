@@ -395,6 +395,41 @@ std::string classify_binding(
     return "other";
 }
 
+bool anatomical_neighbors(
+    const std::string& a,
+    const std::string& b) {
+
+    if (a == b) {
+        return true;
+    }
+
+    const auto matches =
+        [&](const char* x,
+            const char* y) {
+            return (a == x && b == y)
+                || (a == y && b == x);
+        };
+
+    return
+        matches("pelvis", "thigh_l")
+        || matches("pelvis", "thigh_r")
+        || matches("thigh_l", "calf_l")
+        || matches("thigh_r", "calf_r")
+        || matches("calf_l", "foot_l")
+        || matches("calf_r", "foot_r")
+        || matches("spine_03", "upperarm_l")
+        || matches("spine_03", "upperarm_r")
+        || matches("upperarm_l", "lowerarm_l")
+        || matches("upperarm_r", "lowerarm_r")
+        || matches("lowerarm_l", "hand_l")
+        || matches("lowerarm_r", "hand_r")
+        || matches("spine_01", "spine_02")
+        || matches("spine_02", "spine_03")
+        || matches("spine_03", "neck_01")
+        || matches("neck_01", "Head")
+        || matches("pelvis", "spine_01");
+}
+
 std::uint64_t voxel_key(
     int x,
     int y,
@@ -1138,6 +1173,213 @@ VoxelizedCharacter::detach_anatomical_region_if_disconnected(
 
     detached.anatomical_region =
         anatomical_region;
+
+    for (const std::size_t index
+         : detached.voxel_indices) {
+
+        voxels_[index].state =
+            CharacterVoxelState::Detached;
+    }
+
+    return detached;
+}
+
+std::optional<DetachedVoxelComponent>
+VoxelizedCharacter::detach_component_near_anatomical(
+    const std::vector<Vec3>& world_centers,
+    const Vec3& seed_world_point,
+    std::size_t minimum_voxels) {
+
+    if (world_centers.size()
+            != voxels_.size()
+        || minimum_voxels == 0) {
+        throw std::invalid_argument(
+            "invalid anatomical component detachment request");
+    }
+
+    std::unordered_map<
+        std::uint64_t,
+        std::size_t> grid;
+
+    grid.reserve(
+        voxels_.size() * 2);
+
+    std::size_t seed_index =
+        std::numeric_limits<std::size_t>::max();
+
+    double seed_distance =
+        std::numeric_limits<double>::infinity();
+
+    for (std::size_t i = 0;
+         i < voxels_.size();
+         ++i) {
+
+        if (voxels_[i].state
+            != CharacterVoxelState::Attached) {
+            continue;
+        }
+
+        grid.emplace(
+            voxel_key(
+                voxels_[i].grid_x,
+                voxels_[i].grid_y,
+                voxels_[i].grid_z),
+            i);
+
+        const double distance =
+            length_squared(
+                world_centers[i]
+                - seed_world_point);
+
+        if (distance < seed_distance) {
+            seed_distance = distance;
+            seed_index = i;
+        }
+    }
+
+    if (seed_index
+        == std::numeric_limits<std::size_t>::max()) {
+        return std::nullopt;
+    }
+
+    constexpr int directions[6][3] = {
+        { 1,  0,  0},
+        {-1,  0,  0},
+        { 0,  1,  0},
+        { 0, -1,  0},
+        { 0,  0,  1},
+        { 0,  0, -1}
+    };
+
+    std::vector<int> component_of(
+        voxels_.size(),
+        -1);
+
+    std::vector<std::vector<std::size_t>>
+        components;
+
+    for (std::size_t start = 0;
+         start < voxels_.size();
+         ++start) {
+
+        if (voxels_[start].state
+                != CharacterVoxelState::Attached
+            || component_of[start] >= 0) {
+            continue;
+        }
+
+        const int component_id =
+            static_cast<int>(
+                components.size());
+
+        components.push_back({});
+
+        std::vector<std::size_t> queue;
+        queue.push_back(start);
+        component_of[start] = component_id;
+
+        std::size_t cursor = 0;
+
+        while (cursor < queue.size()) {
+            const std::size_t current =
+                queue[cursor++];
+
+            components.back().push_back(
+                current);
+
+            const CharacterVoxel& voxel =
+                voxels_[current];
+
+            for (const auto& direction
+                 : directions) {
+
+                const int nx =
+                    voxel.grid_x + direction[0];
+                const int ny =
+                    voxel.grid_y + direction[1];
+                const int nz =
+                    voxel.grid_z + direction[2];
+
+                if (nx < 0
+                    || ny < 0
+                    || nz < 0) {
+                    continue;
+                }
+
+                const auto found =
+                    grid.find(
+                        voxel_key(
+                            nx,
+                            ny,
+                            nz));
+
+                if (found == grid.end()) {
+                    continue;
+                }
+
+                const std::size_t neighbor =
+                    found->second;
+
+                if (component_of[neighbor] >= 0) {
+                    continue;
+                }
+
+                if (!anatomical_neighbors(
+                        voxel.anatomical_region,
+                        voxels_[neighbor]
+                            .anatomical_region)) {
+                    continue;
+                }
+
+                component_of[neighbor] =
+                    component_id;
+
+                queue.push_back(
+                    neighbor);
+            }
+        }
+    }
+
+    if (components.empty()) {
+        return std::nullopt;
+    }
+
+    const int seed_component_id =
+        component_of[seed_index];
+
+    if (seed_component_id < 0) {
+        return std::nullopt;
+    }
+
+    std::size_t largest_component = 0;
+
+    for (std::size_t i = 1;
+         i < components.size();
+         ++i) {
+
+        if (components[i].size()
+            > components[largest_component].size()) {
+            largest_component = i;
+        }
+    }
+
+    const std::size_t seed_component =
+        static_cast<std::size_t>(
+            seed_component_id);
+
+    if (seed_component == largest_component
+        || components[seed_component].size()
+            < minimum_voxels) {
+        return std::nullopt;
+    }
+
+    DetachedVoxelComponent detached;
+    detached.voxel_indices =
+        components[seed_component];
+
+    detached.anatomical_region =
+        voxels_[seed_index]
+            .anatomical_region;
 
     for (const std::size_t index
          : detached.voxel_indices) {
