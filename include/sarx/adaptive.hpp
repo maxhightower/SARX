@@ -34,6 +34,10 @@ struct AdaptiveDamageDomain {
 [[nodiscard]] SolverDomain solver_domain(
     const AdaptiveDamageDomain& domain);
 
+[[nodiscard]] AdaptiveDamageDomain close_over_free_islands(
+    const Body& body,
+    const AdaptiveDamageDomain& seed);
+
 class AdaptiveDomainTracker {
 public:
     void reset(const Body& body);
