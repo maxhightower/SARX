@@ -478,13 +478,56 @@ MotionRecoveryPlan plan_authored_injury_locomotion(
         double transition_continuity;
     };
 
-    static constexpr PreferredMotion preferred[] = {
+    auto attached_fraction =
+        [&](const std::string& region) {
+
+            const auto found =
+                std::find_if(
+                    anatomy.begin(),
+                    anatomy.end(),
+                    [&](const AnatomicalAvailability& availability) {
+                        return availability.region == region;
+                    });
+
+            return found == anatomy.end()
+                ? 1.0
+                : found->attached_fraction();
+        };
+
+    const bool complete_foot_loss =
+        attached_fraction("foot_l") < 0.10
+        || attached_fraction("foot_r") < 0.10;
+
+    // For complete foot loss, the authored CMU Limp clip is the only
+    // presently certified locomotion successor. WalkWoundedLeg failed the
+    // sustained stump-support gate; HurtLegWalk showed root travel without
+    // meaningful leg cycling; DragBadLegWalk does not match this injury; and
+    // PainfulLeftKnee is reserved for knee/partial-leg injuries.
+    static constexpr PreferredMotion foot_loss_preferred[] = {
+        {"Limp", 0.98, 0.92}
+    };
+
+    static constexpr PreferredMotion general_injury_preferred[] = {
         {"WalkWoundedLeg", 0.97, 0.92},
         {"Limp", 0.95, 0.89},
         {"PainfulLeftKnee", 0.91, 0.85}
     };
 
-    for (const auto& preference : preferred) {
+    const PreferredMotion* preferred_begin =
+        complete_foot_loss
+        ? std::begin(foot_loss_preferred)
+        : std::begin(general_injury_preferred);
+
+    const PreferredMotion* preferred_end =
+        complete_foot_loss
+        ? std::end(foot_loss_preferred)
+        : std::end(general_injury_preferred);
+
+    for (const PreferredMotion* it = preferred_begin;
+         it != preferred_end;
+         ++it) {
+
+        const auto& preference = *it;
         const std::string* motion =
             find_motion(
                 available_motions,
