@@ -1830,6 +1830,160 @@ void test_motion_recovery_selects_fall_without_rewriting_intent() {
         "missing authored collapse clip should select deterministic procedural fall fallback");
 }
 
+void test_grounded_recovery_selects_kneel_and_defers_locomotion() {
+    std::vector<sarx::AnatomicalAvailability> one_leg = {
+        {"pelvis", 100, 100},
+        {"spine_01", 100, 100},
+        {"thigh_l", 100, 44},
+        {"calf_l", 100, 0},
+        {"foot_l", 100, 0},
+        {"thigh_r", 100, 100},
+        {"calf_r", 100, 100},
+        {"foot_r", 100, 100},
+        {"upperarm_l", 100, 100},
+        {"lowerarm_l", 100, 100},
+        {"upperarm_r", 100, 100},
+        {"lowerarm_r", 100, 100}
+    };
+
+    sarx::MotionPhysicalState grounded;
+    grounded.grounded = true;
+    grounded.airborne = false;
+    grounded.support_contacts = 8;
+
+    const auto plan =
+        sarx::plan_grounded_recovery(
+            sarx::BehavioralIntent::MoveForward,
+            sarx::GroundedPosture::Prone,
+            {
+                "Death01",
+                "Fixing_Kneeling",
+                "Walk_Formal_Loop"
+            },
+            one_leg,
+            grounded);
+
+    check(
+        plan.transition_required
+            && plan.strategy
+                == sarx::MotionStrategy::Kneel
+            && plan.target_posture
+                == sarx::GroundedPosture::Kneeling,
+        "one intact leg chain should allow prone-to-kneel recovery");
+
+    check(
+        plan.motion_id.find("Kneel")
+            != std::string::npos
+            && !plan.procedural,
+        "grounded recovery should use the authored Quaternius kneeling presentation");
+
+    const bool crawl_available =
+        std::any_of(
+            plan.followup_locomotion_options.begin(),
+            plan.followup_locomotion_options.end(),
+            [](const sarx::MotionCandidateScore& candidate) {
+                return candidate.strategy
+                    == sarx::MotionStrategy::Crawl;
+            });
+
+    const bool hop_available =
+        std::any_of(
+            plan.followup_locomotion_options.begin(),
+            plan.followup_locomotion_options.end(),
+            [](const sarx::MotionCandidateScore& candidate) {
+                return candidate.strategy
+                    == sarx::MotionStrategy::Hop;
+            });
+
+    check(
+        crawl_available && hop_available,
+        "M2-C should report crawl and hop as later locomotion options without executing them");
+
+    auto no_legs = one_leg;
+
+    for (auto& region : no_legs) {
+        if (region.region == "thigh_r"
+            || region.region == "calf_r"
+            || region.region == "foot_r") {
+            region.attached_voxels = 0;
+        }
+    }
+
+    const auto prone_plan =
+        sarx::plan_grounded_recovery(
+            sarx::BehavioralIntent::MoveForward,
+            sarx::GroundedPosture::Prone,
+            {
+                "Death01",
+                "Fixing_Kneeling"
+            },
+            no_legs,
+            grounded);
+
+    check(
+        !prone_plan.transition_required
+            && prone_plan.strategy
+                == sarx::MotionStrategy::Prone,
+        "without a complete support leg M2-C should remain prone rather than invent a kneel");
+
+    const bool crawl_without_legs =
+        std::any_of(
+            prone_plan.followup_locomotion_options.begin(),
+            prone_plan.followup_locomotion_options.end(),
+            [](const sarx::MotionCandidateScore& candidate) {
+                return candidate.strategy
+                    == sarx::MotionStrategy::Crawl;
+            });
+
+    const bool hop_without_legs =
+        std::any_of(
+            prone_plan.followup_locomotion_options.begin(),
+            prone_plan.followup_locomotion_options.end(),
+            [](const sarx::MotionCandidateScore& candidate) {
+                return candidate.strategy
+                    == sarx::MotionStrategy::Hop;
+            });
+
+    check(
+        crawl_without_legs && !hop_without_legs,
+        "bilateral leg loss should preserve crawl as a future option but reject hop");
+}
+
+void test_grounded_recovery_getup_requires_intact_biped() {
+    std::vector<sarx::AnatomicalAvailability> intact = {
+        {"pelvis", 100, 100},
+        {"spine_01", 100, 100},
+        {"thigh_l", 100, 100},
+        {"calf_l", 100, 100},
+        {"foot_l", 100, 100},
+        {"thigh_r", 100, 100},
+        {"calf_r", 100, 100},
+        {"foot_r", 100, 100}
+    };
+
+    sarx::MotionPhysicalState grounded;
+    grounded.grounded = true;
+    grounded.support_contacts = 6;
+
+    const auto plan =
+        sarx::plan_grounded_recovery(
+            sarx::BehavioralIntent::Stand,
+            sarx::GroundedPosture::Prone,
+            {
+                "Fixing_Kneeling",
+                "GetUp_Back"
+            },
+            intact,
+            grounded);
+
+    check(
+        plan.strategy
+                == sarx::MotionStrategy::GetUp
+            && plan.target_posture
+                == sarx::GroundedPosture::Standing,
+        "intact anatomy plus authored get-up should prefer standing recovery");
+}
+
 void test_humanoid_shoulder_cut_detaches_arm_cleanly() {
     auto fixture = sarx::build_humanoid_fixture();
     DamageSystem damage;
@@ -1921,6 +2075,8 @@ int main() {
     test_detached_articulation_generalizes_passive_joints();
     test_motion_viability_rejects_leg_loss_but_allows_hand_loss();
     test_motion_recovery_selects_fall_without_rewriting_intent();
+    test_grounded_recovery_selects_kneel_and_defers_locomotion();
+    test_grounded_recovery_getup_requires_intact_biped();
     test_humanoid_shoulder_cut_detaches_arm_cleanly();
 
     if (failures != 0) {
