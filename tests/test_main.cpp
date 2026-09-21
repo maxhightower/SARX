@@ -7,6 +7,7 @@
 #include "sarx/humanoid.hpp"
 #include "sarx/detached_articulation.hpp"
 #include "sarx/motion_viability.hpp"
+#include "sarx/motion_recovery.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1734,6 +1735,101 @@ void test_motion_viability_rejects_leg_loss_but_allows_hand_loss() {
           "Walk invalidation should identify the missing load-bearing thigh");
 }
 
+void test_motion_recovery_selects_fall_without_rewriting_intent() {
+    std::vector<sarx::AnatomicalAvailability> anatomy = {
+        {"pelvis", 100, 100},
+        {"spine_01", 100, 100},
+        {"thigh_l", 100, 44},
+        {"calf_l", 100, 0},
+        {"foot_l", 100, 0},
+        {"thigh_r", 100, 100},
+        {"calf_r", 100, 100},
+        {"foot_r", 100, 100},
+        {"upperarm_l", 100, 100},
+        {"lowerarm_l", 100, 100},
+        {"upperarm_r", 100, 100},
+        {"lowerarm_r", 100, 100}
+    };
+
+    const auto walk_capability =
+        sarx::describe_motion_capability(
+            "Walk_Formal_Loop");
+
+    check(
+        walk_capability.locomotion_type
+            == sarx::MotionLocomotionType::BipedalLocomotion,
+        "Walk capability should identify bipedal locomotion");
+
+    const auto walk_viability =
+        sarx::evaluate_motion_viability(
+            walk_capability,
+            anatomy);
+
+    check(
+        walk_viability.state
+            == sarx::MotionViability::Invalid,
+        "severed load-bearing left leg should invalidate Walk capability");
+
+    const auto fall_viability =
+        sarx::evaluate_motion_viability(
+            "Death01",
+            anatomy);
+
+    check(
+        fall_viability.state
+            != sarx::MotionViability::Invalid,
+        "collapse recovery should remain viable after distal leg loss");
+
+    sarx::MotionPhysicalState physical;
+    physical.root_velocity =
+        {0.0, 0.0, -1.4};
+    physical.grounded = true;
+    physical.support_contacts = 1;
+
+    const auto plan =
+        sarx::plan_motion_recovery(
+            sarx::BehavioralIntent::MoveForward,
+            "Walk_Formal_Loop",
+            {
+                "Idle_Loop",
+                "Walk_Formal_Loop",
+                "Fixing_Kneeling",
+                "Death01"
+            },
+            anatomy,
+            physical);
+
+    check(
+        plan.transition_required,
+        "invalid Walk should request a successor motion");
+
+    check(
+        plan.strategy
+            == sarx::MotionStrategy::Fall,
+        "M2-1 should choose Fall after load-bearing gait failure");
+
+    check(
+        plan.motion_id == "Death01"
+            && !plan.procedural,
+        "current Quaternius library should use Death01 only as the authored fall presentation alias");
+
+    const auto fallback =
+        sarx::plan_motion_recovery(
+            sarx::BehavioralIntent::MoveForward,
+            "Walk_Formal_Loop",
+            {"Idle_Loop", "Walk_Formal_Loop"},
+            anatomy,
+            physical);
+
+    check(
+        fallback.strategy
+                == sarx::MotionStrategy::Fall
+            && fallback.procedural
+            && fallback.motion_id
+                == "ProceduralFall",
+        "missing authored collapse clip should select deterministic procedural fall fallback");
+}
+
 void test_humanoid_shoulder_cut_detaches_arm_cleanly() {
     auto fixture = sarx::build_humanoid_fixture();
     DamageSystem damage;
@@ -1824,6 +1920,7 @@ int main() {
     test_humanoid_fixture_is_connected_and_shaped();
     test_detached_articulation_generalizes_passive_joints();
     test_motion_viability_rejects_leg_loss_but_allows_hand_loss();
+    test_motion_recovery_selects_fall_without_rewriting_intent();
     test_humanoid_shoulder_cut_detaches_arm_cleanly();
 
     if (failures != 0) {
