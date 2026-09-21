@@ -335,40 +335,6 @@ SegmentDistanceResult segment_tetra_distance(
     return best;
 }
 
-bool segment_tetra_intersection(
-    const Vec3& p,
-    const Vec3& q,
-    const Vec3& a,
-    const Vec3& b,
-    const Vec3& c,
-    const Vec3& d,
-    Vec3& hit) {
-
-    if (point_in_tetra(p, a, b, c, d)) {
-        hit = p;
-        return true;
-    }
-    if (point_in_tetra(q, a, b, c, d)) {
-        hit = q;
-        return true;
-    }
-
-    const std::array<std::array<Vec3, 3>, 4> faces{{
-        {a, b, c},
-        {a, b, d},
-        {a, c, d},
-        {b, c, d}
-    }};
-
-    for (const auto& face : faces) {
-        if (segment_triangle_intersection(
-                p, q, face[0], face[1], face[2], hit)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 DamageCandidates all_candidates(const Body& body) {
     DamageCandidates candidates;
     candidates.structural.reserve(body.structural_constraints().size());
