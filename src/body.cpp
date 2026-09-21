@@ -112,6 +112,7 @@ ConstraintId Body::add_tetrahedral_constraint(
     ParticleId c,
     ParticleId d,
     double compliance,
+    double break_damage,
     MaterialId material) {
 
     const std::size_t n = particles_.size();
@@ -120,8 +121,8 @@ ConstraintId Body::add_tetrahedral_constraint(
         || b == c || b == d || c == d) {
         throw std::out_of_range("invalid tetrahedral constraint particles");
     }
-    if (compliance < 0.0) {
-        throw std::invalid_argument("tetrahedral compliance must be non-negative");
+    if (compliance < 0.0 || break_damage <= 0.0) {
+        throw std::invalid_argument("invalid tetrahedral parameters");
     }
 
     const Vec3& p0 = particles_[a].position;
@@ -142,6 +143,8 @@ ConstraintId Body::add_tetrahedral_constraint(
         d,
         rest_volume,
         compliance,
+        0.0,
+        break_damage,
         0.0,
         true,
         material
@@ -198,6 +201,22 @@ void Body::damage_structural(ConstraintId constraint, double amount) {
     }
 }
 
+void Body::damage_tetrahedral(ConstraintId constraint, double amount) {
+    if (constraint >= tetrahedral_.size()) {
+        throw std::out_of_range("invalid tetrahedral constraint");
+    }
+    if (amount < 0.0) {
+        throw std::invalid_argument("damage amount must be non-negative");
+    }
+
+    auto& t = tetrahedral_[constraint];
+    t.damage += amount;
+    if (t.damage >= t.break_damage) {
+        t.active = false;
+        t.lambda = 0.0;
+    }
+}
+
 void Body::damage_attachment(ConstraintId constraint, double amount) {
     if (constraint >= attachments_.size()) {
         throw std::out_of_range("invalid attachment constraint");
@@ -239,8 +258,10 @@ void Body::break_structural(ConstraintId constraint) {
 }
 
 void Body::break_tetrahedral(ConstraintId constraint) {
-    tetrahedral_.at(constraint).active = false;
-    tetrahedral_.at(constraint).lambda = 0.0;
+    const auto& t = tetrahedral_.at(constraint);
+    damage_tetrahedral(
+        constraint,
+        std::max(0.0, t.break_damage - t.damage));
 }
 
 void Body::break_attachment(ConstraintId constraint) {
@@ -290,6 +311,13 @@ std::vector<Island> Body::islands() const {
         if (c.active) {
             dsu.unite(c.a, c.b);
         }
+    }
+
+    for (const auto& t : tetrahedral_) {
+        if (!t.active) continue;
+        dsu.unite(t.a, t.b);
+        dsu.unite(t.a, t.c);
+        dsu.unite(t.a, t.d);
     }
 
     std::unordered_map<std::size_t, std::size_t> root_to_island;
