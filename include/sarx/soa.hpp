@@ -16,6 +16,7 @@ struct ParticleSoA {
 struct StructuralSoA {
     std::vector<ParticleId> a, b;
     std::vector<double> rest_length;
+    std::vector<double> compliance;
     std::vector<double> damage;
     std::vector<double> break_damage;
     std::vector<std::uint8_t> active;
@@ -25,6 +26,7 @@ struct StructuralSoA {
 struct TetrahedralSoA {
     std::vector<ParticleId> a, b, c, d;
     std::vector<double> rest_volume;
+    std::vector<double> compliance;
     std::vector<double> damage;
     std::vector<double> break_damage;
     std::vector<std::uint8_t> active;
@@ -45,6 +47,7 @@ struct AttachmentSoA {
     std::vector<ParticleId> particle;
     std::vector<BoneId> bone;
     std::vector<double> offset_x, offset_y, offset_z;
+    std::vector<double> compliance;
     std::vector<double> damage;
     std::vector<double> break_damage;
     std::vector<std::uint8_t> active;
@@ -60,5 +63,16 @@ struct BodySoA {
 };
 
 [[nodiscard]] BodySoA snapshot_body_soa(const Body& body);
+
+[[nodiscard]] StepStats step_soa(
+    BodySoA& body,
+    double dt,
+    const StepConfig& config = {});
+
+[[nodiscard]] StepStats step_soa_restricted(
+    BodySoA& body,
+    double dt,
+    const SolverDomain& domain,
+    const StepConfig& config = {});
 
 } // namespace sarx
