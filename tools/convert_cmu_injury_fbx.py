@@ -3,6 +3,29 @@ import bpy
 import sys
 from pathlib import Path
 
+
+BONE_MAP = {
+    "hip": "pelvis",
+    "abdomen": "spine_01",
+    "chest": "spine_03",
+    "neck": "neck_01",
+    "head": "Head",
+    "rCollar": "clavicle_r",
+    "rShldr": "upperarm_r",
+    "rForeArm": "lowerarm_r",
+    "rHand": "hand_r",
+    "lCollar": "clavicle_l",
+    "lShldr": "upperarm_l",
+    "lForeArm": "lowerarm_l",
+    "lHand": "hand_l",
+    "rThigh": "thigh_r",
+    "rShin": "calf_r",
+    "rFoot": "foot_r",
+    "lThigh": "thigh_l",
+    "lShin": "calf_l",
+    "lFoot": "foot_l",
+}
+
 CLIP_NAMES = {
     "91_16": "CMU_Limp",
     "91_24": "CMU_HurtLegWalk",
@@ -46,6 +69,32 @@ def main():
     bone_names = [bone.name for bone in armature.data.bones]
     print("SARX_CMU_SOURCE_ARMATURE", source.name, armature.name)
     print("SARX_CMU_SOURCE_BONES", "|".join(bone_names))
+
+    renamed = {}
+    for source_name, target_name in BONE_MAP.items():
+        bone = armature.data.bones.get(source_name)
+        if bone is None:
+            continue
+        renamed[source_name] = target_name
+        bone.name = target_name
+
+    # Blender normally updates action RNA paths when bones are renamed, but
+    # enforce that rewrite explicitly so the exported glTF channels cannot
+    # silently retain the CMU names.
+    for action in bpy.data.actions:
+        for curve in action.fcurves:
+            for source_name, target_name in renamed.items():
+                old = f'pose.bones["{source_name}"]'
+                new = f'pose.bones["{target_name}"]'
+                if old in curve.data_path:
+                    curve.data_path = curve.data_path.replace(old, new)
+
+    target_names = [bone.name for bone in armature.data.bones if bone.name in BONE_MAP.values()]
+    print("SARX_CMU_RETARGETED_BONES", "|".join(sorted(target_names)))
+    if len(target_names) < 17:
+        raise RuntimeError(
+            f"CMU retarget mapped only {len(target_names)} major Quaternius bones"
+        )
 
     clip_key = source.stem
     clip_name = CLIP_NAMES.get(clip_key, f"CMU_{clip_key}")
