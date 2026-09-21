@@ -1,0 +1,3 @@
+7baa44bf6a6fa38c30630bbed5ccb8a434ee6384d89561aedff5d06df78997d3  assets/cmu/CMU_DragBadLegWalk.glb
+4e5fb897b95642621465477a8d31fedc227c28175f459eb737093de117b15cf0  assets/cmu/CMU_HurtLegWalk.glb
+f52c306b6f912107e5b48155f82b8f26b5fd70e7e5a1c909de226c7a0869bc16  assets/cmu/CMU_Limp.glb
