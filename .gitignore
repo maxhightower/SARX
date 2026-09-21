@@ -8,3 +8,5 @@ out/
 CMakeUserPresets.json
 
 papers/local/
+
+media/raw/
