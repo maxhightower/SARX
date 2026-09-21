@@ -5,6 +5,7 @@
 #include "sarx/adaptive.hpp"
 #include "sarx/soa.hpp"
 #include "sarx/humanoid.hpp"
+#include "sarx/detached_articulation.hpp"
 #include "sarx/motion_viability.hpp"
 
 #include <algorithm>
@@ -1591,6 +1592,87 @@ void test_humanoid_fixture_is_connected_and_shaped() {
           "humanoid fixture should expose a complete right-arm rig chain");
 }
 
+void test_detached_articulation_generalizes_passive_joints() {
+    const double dt = 1.0 / 60.0;
+
+    sarx::DetachedArticulationConfig config;
+    config.rest_anchors = {
+        {0.0, 1.55, 0.0},
+        {0.0, 1.05, 0.0},
+        {0.18, 0.58, 0.0},
+        {0.48, 0.28, 0.06}
+    };
+
+    config.previous_anchors = {
+        {0.0, 1.55, 0.0},
+        {0.0, 1.05, 0.0},
+        {0.10, 0.60, 0.0},
+        {0.36, 0.32, 0.06}
+    };
+
+    config.masses = {
+        0.30,
+        0.30,
+        0.22,
+        0.18
+    };
+
+    const double ankle_rest =
+        sarx::articulated_joint_angle(
+            config.rest_anchors[1],
+            config.rest_anchors[2],
+            config.rest_anchors[3]);
+
+    config.joints = {
+        sarx::PassiveJointProfile{
+            1,
+            0.35,
+            3.10,
+            0.09,
+            0.70,
+            0.20
+        },
+        sarx::PassiveJointProfile{
+            2,
+            std::max(0.65, ankle_rest - 0.55),
+            std::min(3.10, ankle_rest + 0.55),
+            0.10,
+            0.72,
+            0.24
+        }
+    };
+
+    config.ground_radius = 0.04;
+    config.contact_iterations = 8;
+
+    sarx::DetachedArticulatedChain chain;
+    chain.initialize(config, dt);
+
+    check(chain.segment_count() == 3,
+          "general detached articulation should preserve three segment links");
+    check(chain.joint_count() == 2,
+          "general detached articulation should expose knee/ankle-style passive joints");
+
+    for (int i = 0; i < 45; ++i) {
+        chain.step(dt);
+    }
+
+    check(chain.ever_grounded(),
+          "general detached articulation should share segment-level floor response");
+
+    check(chain.max_joint_angle_delta(0) > 1e-3
+              || chain.max_joint_angle_delta(1) > 1e-3,
+          "general detached articulation should permit real post-detachment joint motion");
+
+    check(chain.joint_angle(0) >= 0.25
+              && chain.joint_angle(0) <= 3.14,
+          "passive joint solver should keep the first joint inside anatomical limits");
+
+    check(chain.joint_angle(1) >= 0.55
+              && chain.joint_angle(1) <= 3.14,
+          "passive joint solver should keep the second joint inside anatomical limits");
+}
+
 void test_motion_viability_rejects_leg_loss_but_allows_hand_loss() {
     std::vector<sarx::AnatomicalAvailability> intact = {
         {"thigh_l", 100, 100},
@@ -1740,6 +1822,7 @@ int main() {
     test_adaptive_domain_closes_over_detached_free_island();
     test_plane_cut_cleanly_separates_generated_volume();
     test_humanoid_fixture_is_connected_and_shaped();
+    test_detached_articulation_generalizes_passive_joints();
     test_motion_viability_rejects_leg_loss_but_allows_hand_loss();
     test_humanoid_shoulder_cut_detaches_arm_cleanly();
 
