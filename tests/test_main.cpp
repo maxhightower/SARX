@@ -1403,6 +1403,50 @@ void test_soa_restricted_solver_matches_body() {
           "CPU and SoA restricted solvers should report identical work accounting");
 }
 
+
+void test_tetrahedral_cut_honors_capsule_radius() {
+    auto build_tet = []() {
+        Body body;
+        const auto p0 = body.add_particle({0.0, 0.0, 0.0});
+        const auto p1 = body.add_particle({1.0, 0.0, 0.0});
+        const auto p2 = body.add_particle({0.0, 1.0, 0.0});
+        const auto p3 = body.add_particle({0.0, 0.0, 1.0});
+        body.add_tetrahedral_constraint(
+            p0, p1, p2, p3, 0.0, 1.0);
+        return body;
+    };
+
+    Body grazing = build_tet();
+    Body miss = build_tet();
+
+    DamageSystem grazing_damage;
+    DamageSystem miss_damage;
+
+    CapsuleDamage blade;
+    blade.a = {0.20, -0.05, -0.20};
+    blade.b = {0.20, -0.05, 0.40};
+    blade.radius = 0.10;
+    blade.energy = 2.5;
+    blade.mode = DamageMode::Cut;
+
+    const auto grazing_report =
+        grazing_damage.apply_capsule(grazing, blade);
+
+    check(!grazing.tetrahedral_constraints()[0].active,
+          "finite-radius blade should damage a tetrahedron even when its centerline only grazes the surface");
+    check(grazing_report.broken_count() == 1,
+          "grazing finite-radius tet cut should emit one terminal fracture");
+
+    blade.radius = 0.02;
+    const auto miss_report =
+        miss_damage.apply_capsule(miss, blade);
+
+    check(miss.tetrahedral_constraints()[0].active,
+          "same blade centerline should miss the tetrahedron when radius is below the surface distance");
+    check(miss_report.events.empty(),
+          "out-of-radius tetrahedron should not receive a fracture event");
+}
+
 } // namespace
 
 int main() {
@@ -1439,6 +1483,7 @@ int main() {
     test_adaptive_domain_tracker_upsert_and_refit();
     test_soa_full_solver_matches_body();
     test_soa_restricted_solver_matches_body();
+    test_tetrahedral_cut_honors_capsule_radius();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
