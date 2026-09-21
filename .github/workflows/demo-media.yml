@@ -76,6 +76,7 @@ jobs:
 
       - name: Render bridge frames
         run: |
+          set -o pipefail
           ./build/sarx_severance_demo \
             --output build/demo_frames \
             --frames 120 \
@@ -83,6 +84,7 @@ jobs:
 
       - name: Render humanoid frames
         run: |
+          set -o pipefail
           ./build/sarx_humanoid_demo \
             --output build/humanoid_frames \
             --frames 150 \
@@ -90,6 +92,7 @@ jobs:
 
       - name: Render real skinned walk frames
         run: |
+          set -o pipefail
           ./build/sarx_character_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
@@ -101,6 +104,7 @@ jobs:
 
       - name: Render real skinned severance frames
         run: |
+          set -o pipefail
           ./build/sarx_character_severance_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
@@ -115,6 +119,7 @@ jobs:
 
       - name: Render real skinned left-arm severance frames
         run: |
+          set -o pipefail
           ./build/sarx_character_severance_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
@@ -129,6 +134,7 @@ jobs:
 
       - name: Render real skinned head severance frames
         run: |
+          set -o pipefail
           ./build/sarx_character_head_severance_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
@@ -142,6 +148,7 @@ jobs:
 
       - name: Render Quaternius voxel left-hand detachment frames
         run: |
+          set -o pipefail
           ./build/sarx_character_voxel_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
