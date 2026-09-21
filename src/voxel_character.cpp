@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <deque>
 #include <limits>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace sarx {
 namespace {
@@ -371,6 +374,9 @@ void VoxelizedCharacter::build(
                 voxel.anchor_offset =
                     center
                     - rest_mesh.positions[anchor];
+                voxel.grid_x = static_cast<int>(x);
+                voxel.grid_y = static_cast<int>(y);
+                voxel.grid_z = static_cast<int>(z);
 
                 voxels_.push_back(voxel);
             }
@@ -410,7 +416,8 @@ CharacterMeshFrame VoxelizedCharacter::render(
                 voxels_.begin(),
                 voxels_.end(),
                 [](const CharacterVoxel& voxel) {
-                    return voxel.active;
+                    return voxel.state
+                        == CharacterVoxelState::Attached;
                 }));
 
     out.positions.reserve(
@@ -422,7 +429,8 @@ CharacterMeshFrame VoxelizedCharacter::render(
         voxel_size_ * 0.47;
 
     for (const CharacterVoxel& voxel : voxels_) {
-        if (!voxel.active) {
+        if (voxel.state
+            != CharacterVoxelState::Attached) {
             continue;
         }
 
@@ -454,7 +462,8 @@ std::size_t VoxelizedCharacter::damage_sphere(
     std::size_t destroyed = 0;
 
     for (CharacterVoxel& voxel : voxels_) {
-        if (!voxel.active) {
+        if (voxel.state
+            != CharacterVoxelState::Attached) {
             continue;
         }
 
@@ -472,7 +481,8 @@ std::size_t VoxelizedCharacter::damage_sphere(
         voxel.damage += damage;
         if (voxel.damage
             >= voxel.break_damage) {
-            voxel.active = false;
+            voxel.state =
+                CharacterVoxelState::Destroyed;
             ++destroyed;
         }
     }
@@ -480,17 +490,294 @@ std::size_t VoxelizedCharacter::damage_sphere(
     return destroyed;
 }
 
+
+CharacterMeshFrame VoxelizedCharacter::render_component(
+    const DetachedVoxelComponent& component,
+    const std::vector<Vec3>& world_centers) const {
+
+    if (component.voxel_indices.size()
+        != world_centers.size()) {
+        throw std::invalid_argument(
+            "detached voxel component center count mismatch");
+    }
+
+    CharacterMeshFrame out;
+    out.positions.reserve(
+        component.voxel_indices.size() * 8);
+    out.indices.reserve(
+        component.voxel_indices.size() * 36);
+
+    const double half =
+        voxel_size_ * 0.47;
+
+    for (std::size_t i = 0;
+         i < component.voxel_indices.size();
+         ++i) {
+
+        const std::size_t voxel_index =
+            component.voxel_indices[i];
+
+        if (voxel_index >= voxels_.size()) {
+            throw std::out_of_range(
+                "detached voxel index out of range");
+        }
+
+        append_cube(
+            out,
+            world_centers[i],
+            half);
+    }
+
+    return out;
+}
+
+namespace {
+
+std::uint64_t voxel_key(
+    int x,
+    int y,
+    int z) {
+
+    constexpr std::uint64_t mask =
+        (std::uint64_t{1} << 21) - 1;
+
+    return
+        (static_cast<std::uint64_t>(x) & mask)
+            << 42
+        | (static_cast<std::uint64_t>(y) & mask)
+            << 21
+        | (static_cast<std::uint64_t>(z) & mask);
+}
+
+} // namespace
+
+std::optional<DetachedVoxelComponent>
+VoxelizedCharacter::detach_component_near(
+    const CharacterMeshFrame& animated_mesh,
+    const Vec3& seed_world_point,
+    std::size_t minimum_voxels) {
+
+    if (minimum_voxels == 0) {
+        throw std::invalid_argument(
+            "minimum detached voxel count must be positive");
+    }
+
+    std::unordered_map<
+        std::uint64_t,
+        std::size_t> grid;
+
+    grid.reserve(voxels_.size() * 2);
+
+    std::size_t seed_index =
+        std::numeric_limits<std::size_t>::max();
+
+    double seed_distance =
+        std::numeric_limits<double>::infinity();
+
+    for (std::size_t i = 0;
+         i < voxels_.size();
+         ++i) {
+
+        const CharacterVoxel& voxel =
+            voxels_[i];
+
+        if (voxel.state
+            != CharacterVoxelState::Attached) {
+            continue;
+        }
+
+        grid.emplace(
+            voxel_key(
+                voxel.grid_x,
+                voxel.grid_y,
+                voxel.grid_z),
+            i);
+
+        const double distance =
+            length_squared(
+                current_center(
+                    voxel,
+                    animated_mesh)
+                - seed_world_point);
+
+        if (distance < seed_distance) {
+            seed_distance = distance;
+            seed_index = i;
+        }
+    }
+
+    if (seed_index
+        == std::numeric_limits<std::size_t>::max()) {
+        return std::nullopt;
+    }
+
+    std::vector<int> component_of(
+        voxels_.size(),
+        -1);
+
+    std::vector<std::vector<std::size_t>>
+        components;
+
+    for (std::size_t start = 0;
+         start < voxels_.size();
+         ++start) {
+
+        if (voxels_[start].state
+                != CharacterVoxelState::Attached
+            || component_of[start] >= 0) {
+            continue;
+        }
+
+        const int component_id =
+            static_cast<int>(
+                components.size());
+
+        components.push_back({});
+        auto& component =
+            components.back();
+
+        std::deque<std::size_t> queue;
+        queue.push_back(start);
+        component_of[start] = component_id;
+
+        while (!queue.empty()) {
+            const std::size_t current =
+                queue.front();
+            queue.pop_front();
+
+            component.push_back(current);
+
+            const CharacterVoxel& voxel =
+                voxels_[current];
+
+            for (int dz = -1; dz <= 1; ++dz) {
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        if (dx == 0
+                            && dy == 0
+                            && dz == 0) {
+                            continue;
+                        }
+
+                        const int nx =
+                            voxel.grid_x + dx;
+                        const int ny =
+                            voxel.grid_y + dy;
+                        const int nz =
+                            voxel.grid_z + dz;
+
+                        if (nx < 0
+                            || ny < 0
+                            || nz < 0) {
+                            continue;
+                        }
+
+                        const auto it =
+                            grid.find(
+                                voxel_key(
+                                    nx,
+                                    ny,
+                                    nz));
+
+                        if (it == grid.end()) {
+                            continue;
+                        }
+
+                        const std::size_t neighbor =
+                            it->second;
+
+                        if (component_of[neighbor]
+                            >= 0) {
+                            continue;
+                        }
+
+                        component_of[neighbor] =
+                            component_id;
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+        }
+    }
+
+    if (components.empty()) {
+        return std::nullopt;
+    }
+
+    std::size_t largest_component = 0;
+    for (std::size_t i = 1;
+         i < components.size();
+         ++i) {
+        if (components[i].size()
+            > components[largest_component].size()) {
+            largest_component = i;
+        }
+    }
+
+    const int seed_component_id =
+        component_of[seed_index];
+
+    if (seed_component_id < 0) {
+        return std::nullopt;
+    }
+
+    const std::size_t seed_component =
+        static_cast<std::size_t>(
+            seed_component_id);
+
+    if (seed_component == largest_component
+        || components[seed_component].size()
+            < minimum_voxels) {
+        return std::nullopt;
+    }
+
+    DetachedVoxelComponent detached;
+    detached.voxel_indices =
+        components[seed_component];
+
+    for (const std::size_t index
+         : detached.voxel_indices) {
+        voxels_[index].state =
+            CharacterVoxelState::Detached;
+    }
+
+    return detached;
+}
+
+Vec3 VoxelizedCharacter::voxel_center(
+    std::size_t voxel_index,
+    const CharacterMeshFrame& animated_mesh) const {
+
+    if (voxel_index >= voxels_.size()) {
+        throw std::out_of_range(
+            "character voxel index out of range");
+    }
+
+    return current_center(
+        voxels_[voxel_index],
+        animated_mesh);
+}
+
 VoxelizedCharacterStats VoxelizedCharacter::stats() const {
     VoxelizedCharacterStats out;
     out.total_voxels = voxels_.size();
-    out.active_voxels =
-        static_cast<std::size_t>(
-            std::count_if(
-                voxels_.begin(),
-                voxels_.end(),
-                [](const CharacterVoxel& voxel) {
-                    return voxel.active;
-                }));
+
+    for (const CharacterVoxel& voxel : voxels_) {
+        switch (voxel.state) {
+        case CharacterVoxelState::Attached:
+            ++out.attached_voxels;
+            ++out.active_voxels;
+            break;
+        case CharacterVoxelState::Detached:
+            ++out.detached_voxels;
+            ++out.active_voxels;
+            break;
+        case CharacterVoxelState::Destroyed:
+            ++out.destroyed_voxels;
+            break;
+        }
+    }
+
     out.voxel_size = voxel_size_;
     return out;
 }
