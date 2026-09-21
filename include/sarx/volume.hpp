@@ -28,6 +28,10 @@ struct VoxelLatticeSpec {
 
     // Axial + face/body diagonal links improve isotropy over a 6-neighbor grid.
     bool include_diagonals{true};
+
+    // Six deterministic tetrahedra per lattice cell, sharing the 000->111 diagonal.
+    bool include_tetrahedra{true};
+    double volume_compliance{0.0};
 };
 
 class VoxelLattice {
@@ -69,6 +73,7 @@ struct EmbeddedBoneResult {
     double attachment_break_damage = 1.0,
     MaterialId attachment_material = kDefaultMaterial,
     double joint_break_damage = 1.0,
-    MaterialId joint_material = kDefaultMaterial);
+    MaterialId joint_material = kDefaultMaterial,
+    double joint_radius = 0.0);
 
 } // namespace sarx
