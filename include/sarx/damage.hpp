@@ -3,10 +3,13 @@
 #include "sarx/body.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
 namespace sarx {
+
+using DamageEventId = std::uint64_t;
 
 enum class DamageMode {
     Cut,
@@ -19,9 +22,30 @@ enum class DamageTargetKind {
     BoneJoint
 };
 
+enum class DamageSource {
+    Spatial,
+    Strain
+};
+
+enum class DamageCommandKind {
+    Capsule,
+    Sphere,
+    Strain
+};
+
 struct MaterialResponse {
     double cut_resistance{1.0};
     double blunt_resistance{1.0};
+
+    // Optional world-space fiber model. A zero vector disables anisotropy.
+    Vec3 fiber_direction{};
+    double longitudinal_cut_multiplier{1.0};
+    double transverse_cut_multiplier{1.0};
+
+    // Structural self-failure model.
+    double tensile_yield_strain{1.0e9};
+    double tensile_break_strain{1.0e9};
+    double strain_damage_rate{0.0};
 };
 
 class MaterialTable {
@@ -39,6 +63,7 @@ struct CapsuleDamage {
     double radius{0.05};
     double energy{1.0};
     DamageMode mode{DamageMode::Cut};
+    DamageEventId event_id{0};
 };
 
 struct SphereDamage {
@@ -46,9 +71,24 @@ struct SphereDamage {
     double radius{0.1};
     double energy{1.0};
     DamageMode mode{DamageMode::Blunt};
+    DamageEventId event_id{0};
+};
+
+struct StrainDamage {
+    double dt{1.0 / 60.0};
+    DamageEventId event_id{0};
+};
+
+struct DamageCommand {
+    DamageCommandKind kind{DamageCommandKind::Capsule};
+    CapsuleDamage capsule{};
+    SphereDamage sphere{};
+    StrainDamage strain{};
 };
 
 struct FractureEvent {
+    DamageEventId event_id{};
+    DamageSource source{DamageSource::Spatial};
     DamageTargetKind target_kind{DamageTargetKind::StructuralConstraint};
     std::size_t target_id{};
     MaterialId material{kDefaultMaterial};
@@ -58,6 +98,7 @@ struct FractureEvent {
 };
 
 struct DamageReport {
+    DamageEventId event_id{};
     std::vector<FractureEvent> events;
 
     [[nodiscard]] std::size_t broken_count() const;
@@ -68,11 +109,24 @@ public:
     MaterialTable& materials() { return materials_; }
     [[nodiscard]] const MaterialTable& materials() const { return materials_; }
 
-    [[nodiscard]] DamageReport apply_capsule(Body& body, const CapsuleDamage& damage) const;
-    [[nodiscard]] DamageReport apply_sphere(Body& body, const SphereDamage& damage) const;
+    [[nodiscard]] DamageReport apply_capsule(Body& body, const CapsuleDamage& damage);
+    [[nodiscard]] DamageReport apply_sphere(Body& body, const SphereDamage& damage);
+    [[nodiscard]] DamageReport apply_strain(Body& body, const StrainDamage& damage);
+    [[nodiscard]] DamageReport apply(Body& body, const DamageCommand& command);
+
+    [[nodiscard]] std::vector<DamageReport> replay(
+        Body& body,
+        const std::vector<DamageCommand>& commands);
+
+    [[nodiscard]] const std::vector<DamageCommand>& history() const { return history_; }
+    void clear_history();
 
 private:
+    [[nodiscard]] DamageEventId resolve_event_id(DamageEventId requested);
+
     MaterialTable materials_;
+    DamageEventId next_event_id_{1};
+    std::vector<DamageCommand> history_;
 };
 
 } // namespace sarx
