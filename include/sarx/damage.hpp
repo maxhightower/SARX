@@ -18,6 +18,7 @@ enum class DamageMode {
 
 enum class DamageTargetKind {
     StructuralConstraint,
+    TetrahedralConstraint,
     AttachmentConstraint,
     BoneJoint
 };
@@ -91,6 +92,7 @@ struct DamageCommand {
 
 struct DamageCandidates {
     std::vector<ConstraintId> structural;
+    std::vector<ConstraintId> tetrahedral;
     std::vector<ConstraintId> attachments;
     std::vector<BoneId> bone_joints;
 
