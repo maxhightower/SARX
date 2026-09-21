@@ -55,12 +55,10 @@ jobs:
           }
 
           run_case CMU_Limp build/cmu_limp_frames build/cmu_limp.log build/cmu_limp.status
-          run_case CMU_HurtLegWalk build/cmu_hurt_leg_frames build/cmu_hurt_leg.log build/cmu_hurt_leg.status
           run_case CMU_WalkWoundedLeg build/cmu_wounded_leg_frames build/cmu_wounded_leg.log build/cmu_wounded_leg.status
           run_case CMU_PainfulLeftKnee build/cmu_painful_knee_frames build/cmu_painful_knee.log build/cmu_painful_knee.status
 
           if [[ "$(cat build/cmu_limp.status)" != "0" ]] \
-            && [[ "$(cat build/cmu_hurt_leg.status)" != "0" ]] \
             && [[ "$(cat build/cmu_wounded_leg.status)" != "0" ]] \
             && [[ "$(cat build/cmu_painful_knee.status)" != "0" ]]
           then
@@ -80,22 +78,20 @@ jobs:
             ffmpeg -y               -framerate 30               -i "${frames}/frame_%04d.ppm"               -c:v libx264               -pix_fmt yuv420p               -crf 20               "${output}"
           }
 
-          encode build/cmu_limp_frames build/media/v14a_cmu_limp.mp4
-          encode build/cmu_hurt_leg_frames build/media/v14b_cmu_hurt_leg_walk.mp4
-          encode build/cmu_wounded_leg_frames build/media/v14c_cmu_walk_wounded_leg.mp4
-          encode build/cmu_painful_knee_frames build/media/v14d_cmu_painful_left_knee.mp4
+          encode build/cmu_limp_frames build/media/v15a_cmu_limp.mp4
+          encode build/cmu_wounded_leg_frames build/media/v15b_cmu_walk_wounded_leg.mp4
+          encode build/cmu_painful_knee_frames build/media/v15c_cmu_painful_left_knee.mp4
 
           ffmpeg -y \
-            -i build/media/v14a_cmu_limp.mp4 \
-            -i build/media/v14b_cmu_hurt_leg_walk.mp4 \
-            -i build/media/v14c_cmu_walk_wounded_leg.mp4 \
-            -i build/media/v14d_cmu_painful_left_knee.mp4 \
-            -filter_complex "[0:v]scale=640:480[a];[1:v]scale=640:480[b];[2:v]scale=640:480[c];[3:v]scale=640:480[d];[a][b]hstack[top];[c][d]hstack[bottom];[top][bottom]vstack[v]" \
+            -i build/media/v15a_cmu_limp.mp4 \
+            -i build/media/v15b_cmu_walk_wounded_leg.mp4 \
+            -i build/media/v15c_cmu_painful_left_knee.mp4 \
+            -filter_complex "[0:v]scale=640:480[a];[1:v]scale=640:480[b];[2:v]scale=640:480[c];[a][b][c]hstack=inputs=3[v]" \
             -map "[v]" \
             -c:v libx264 \
             -pix_fmt yuv420p \
             -crf 20 \
-            build/media/v14_cmu_injury_comparison.mp4
+            build/media/v15_cmu_injury_comparison.mp4
 
       - name: Record authored injury provenance
         shell: bash
@@ -109,10 +105,6 @@ jobs:
             echo "[CMU_Limp]"
             cat build/cmu_limp.log
             echo "status=$(cat build/cmu_limp.status)"
-            echo
-            echo "[CMU_HurtLegWalk]"
-            cat build/cmu_hurt_leg.log
-            echo "status=$(cat build/cmu_hurt_leg.status)"
             echo
             echo "[CMU_WalkWoundedLeg]"
             cat build/cmu_wounded_leg.log
