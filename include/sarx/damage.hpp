@@ -89,6 +89,14 @@ struct DamageCommand {
     StrainDamage strain{};
 };
 
+struct DamageCandidates {
+    std::vector<ConstraintId> structural;
+    std::vector<ConstraintId> attachments;
+    std::vector<BoneId> bone_joints;
+
+    [[nodiscard]] std::size_t size() const;
+};
+
 struct FractureEvent {
     DamageEventId event_id{};
     DamageSource source{DamageSource::Spatial};
@@ -121,7 +129,16 @@ public:
     [[nodiscard]] const MaterialTable& materials() const { return materials_; }
 
     [[nodiscard]] DamageReport apply_capsule(Body& body, const CapsuleDamage& damage);
+    [[nodiscard]] DamageReport apply_capsule(
+        Body& body,
+        const CapsuleDamage& damage,
+        const DamageCandidates& candidates);
+
     [[nodiscard]] DamageReport apply_sphere(Body& body, const SphereDamage& damage);
+    [[nodiscard]] DamageReport apply_sphere(
+        Body& body,
+        const SphereDamage& damage,
+        const DamageCandidates& candidates);
     [[nodiscard]] DamageReport apply_strain(Body& body, const StrainDamage& damage);
     [[nodiscard]] DamageReport apply(Body& body, const DamageCommand& command);
 
