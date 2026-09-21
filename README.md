@@ -13,7 +13,20 @@ SARX is being built around four separable representations:
 3. **Dynamic islands** — connected components created by topology failure transition from rig-driven to free physical motion.
 4. **Render representation** — later work will decouple visual detail from physical resolution using mesh/SDF/splat techniques.
 
-The first milestone is deliberately renderer-independent: prove animated target constraints, progressive damage, constraint failure, connected-component separation, and momentum-preserving detachment in a deterministic CPU reference implementation.
+## Current reference milestone: V0.2
+
+The renderer-independent CPU reference now covers:
+
+- compliant bone-target attachments,
+- progressive structural, attachment, and rig-joint damage,
+- connected-component detachment,
+- momentum-preserving transition to free islands,
+- capsule/blade and sphere damage primitives,
+- material-dependent cut/blunt resistance,
+- automatic geometry-driven severance,
+- fracture-event records for downstream rendering/gameplay synchronization.
+
+The next stage will add richer tissue mechanics and a broad-phase/active-region layer before the solver is migrated toward GPU compute.
 
 ## Status
 
