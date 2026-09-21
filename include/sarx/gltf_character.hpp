@@ -74,6 +74,10 @@ public:
     [[nodiscard]] double animation_duration(
         std::size_t animation) const;
 
+    [[nodiscard]] std::vector<std::string>
+    animation_target_nodes(
+        std::size_t animation) const;
+
     [[nodiscard]] CharacterMeshFrame sample(
         std::size_t animation,
         double time_seconds,
