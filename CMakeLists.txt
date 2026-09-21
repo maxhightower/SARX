@@ -191,6 +191,7 @@ if (SARX_BUILD_TESTS)
                 --require-walk-invalidation
                 --require-anatomical-isolation
                 --require-stable-camera
+                --require-articulated-leg
         )
 
         add_test(
