@@ -1,5 +1,5 @@
-#include "sarx/body.hpp"
 #include "sarx/character_render.hpp"
+#include "sarx/detached_articulation.hpp"
 #include "sarx/gltf_character.hpp"
 #include "sarx/motion_viability.hpp"
 #include "sarx/voxel_character.hpp"
@@ -286,17 +286,7 @@ sarx::CharacterMeshFrame combine(
 struct DetachedHand {
     sarx::DetachedVoxelComponent component;
     std::vector<sarx::Vec3> rest_centers;
-
-    sarx::Vec3 rest_a{};
-    sarx::Vec3 rest_b{};
-
-    sarx::Body motion;
-    sarx::ParticleId particle_a{};
-    sarx::ParticleId particle_b{};
-
-    std::size_t ground_contacts{};
-    bool ever_grounded{false};
-    double max_rotation_radians{};
+    sarx::DetachedArticulatedChain articulation;
 };
 
 std::pair<std::size_t, std::size_t>
@@ -315,6 +305,7 @@ farthest_pair(
     for (std::size_t i = 0;
          i < points.size();
          ++i) {
+
         for (std::size_t j = i + 1;
              j < points.size();
              ++j) {
@@ -338,22 +329,6 @@ std::vector<sarx::Vec3>
 detached_world_centers(
     const DetachedHand& hand) {
 
-    const sarx::Vec3 current_a =
-        hand.motion
-            .particles()[hand.particle_a]
-            .position;
-
-    const sarx::Vec3 current_b =
-        hand.motion
-            .particles()[hand.particle_b]
-            .position;
-
-    const sarx::Vec3 rest_axis =
-        hand.rest_b - hand.rest_a;
-
-    const sarx::Vec3 current_axis =
-        current_b - current_a;
-
     std::vector<sarx::Vec3> centers;
     centers.reserve(
         hand.rest_centers.size());
@@ -362,11 +337,9 @@ detached_world_centers(
          : hand.rest_centers) {
 
         centers.push_back(
-            current_a
-            + sarx::rotate_between(
-                rest_axis,
-                current_axis,
-                rest_center - hand.rest_a));
+            hand.articulation.transform_point(
+                0,
+                rest_center));
     }
 
     return centers;
@@ -388,171 +361,6 @@ sarx::Vec3 centroid(
     return result
         / static_cast<double>(
             points.size());
-}
-
-double axis_rotation(
-    const DetachedHand& hand) {
-
-    const sarx::Vec3 rest_axis =
-        sarx::normalized(
-            hand.rest_b - hand.rest_a);
-
-    const sarx::Vec3 current_axis =
-        sarx::normalized(
-            hand.motion
-                .particles()[hand.particle_b]
-                .position
-            - hand.motion
-                .particles()[hand.particle_a]
-                .position);
-
-    if (sarx::length_squared(rest_axis)
-            <= 1e-12
-        || sarx::length_squared(current_axis)
-            <= 1e-12) {
-        return 0.0;
-    }
-
-    return std::acos(
-        std::clamp(
-            sarx::dot(
-                rest_axis,
-                current_axis),
-            -1.0,
-            1.0));
-}
-
-void step_detached_hand(
-    DetachedHand& hand,
-    double dt,
-    double voxel_size) {
-
-    sarx::StepConfig config;
-    config.substeps = 6;
-    config.solver_iterations = 14;
-    config.gravity = {0.0, -9.81, 0.0};
-
-    hand.motion.step(
-        dt,
-        config);
-
-    auto& a =
-        hand.motion
-            .particles()[hand.particle_a];
-
-    auto& b =
-        hand.motion
-            .particles()[hand.particle_b];
-
-    const sarx::Vec3 before_a =
-        a.position;
-    const sarx::Vec3 before_b =
-        b.position;
-
-    const sarx::Vec3 rest_axis =
-        hand.rest_b - hand.rest_a;
-
-    const double rest_axis_squared =
-        std::max(
-            sarx::length_squared(
-                rest_axis),
-            1e-12);
-
-    const double ground_height =
-        voxel_size * 0.47;
-
-    bool contacted = false;
-
-    for (int iteration = 0;
-         iteration < 8;
-         ++iteration) {
-
-        const sarx::Vec3 current_axis =
-            b.position - a.position;
-
-        for (const sarx::Vec3& rest_center
-             : hand.rest_centers) {
-
-            const sarx::Vec3 world_center =
-                a.position
-                + sarx::rotate_between(
-                    rest_axis,
-                    current_axis,
-                    rest_center - hand.rest_a);
-
-            if (world_center.y
-                >= ground_height) {
-                continue;
-            }
-
-            const double penetration =
-                ground_height
-                - world_center.y;
-
-            const double t =
-                std::clamp(
-                    sarx::dot(
-                        rest_center - hand.rest_a,
-                        rest_axis)
-                    / rest_axis_squared,
-                    0.0,
-                    1.0);
-
-            const double wa =
-                1.0 - t;
-            const double wb = t;
-
-            const double denominator =
-                std::max(
-                    wa * wa + wb * wb,
-                    1e-12);
-
-            a.position.y +=
-                penetration * wa
-                / denominator;
-
-            b.position.y +=
-                penetration * wb
-                / denominator;
-
-            contacted = true;
-        }
-    }
-
-    if (contacted) {
-        a.velocity +=
-            (a.position - before_a)
-            / dt
-            * 0.20;
-
-        b.velocity +=
-            (b.position - before_b)
-            / dt
-            * 0.20;
-
-        constexpr double restitution = 0.08;
-        constexpr double friction = 0.64;
-
-        for (auto* particle : {&a, &b}) {
-            if (particle->velocity.y < 0.0) {
-                particle->velocity.y =
-                    -particle->velocity.y
-                    * restitution;
-            }
-
-            particle->velocity.x *= friction;
-            particle->velocity.z *= friction;
-            particle->velocity *= 0.994;
-        }
-
-        ++hand.ground_contacts;
-        hand.ever_grounded = true;
-    }
-
-    hand.max_rotation_radians =
-        std::max(
-            hand.max_rotation_radians,
-            axis_rotation(hand));
 }
 
 } // namespace
@@ -790,39 +598,37 @@ int main(int argc, char** argv) {
                         farthest_pair(
                             hand.rest_centers);
 
-                    hand.rest_a =
-                        hand.rest_centers[a_index];
-                    hand.rest_b =
-                        hand.rest_centers[b_index];
+                    sarx::DetachedArticulationConfig articulation;
 
-                    hand.particle_a =
-                        hand.motion.add_particle(
-                            hand.rest_a,
-                            0.5);
+                    articulation.rest_anchors = {
+                        hand.rest_centers[a_index],
+                        hand.rest_centers[b_index]
+                    };
 
-                    hand.particle_b =
-                        hand.motion.add_particle(
-                            hand.rest_b,
-                            0.5);
+                    articulation.previous_anchors = {
+                        previous_component_centers[a_index],
+                        previous_component_centers[b_index]
+                    };
 
-                    hand.motion
-                        .particles()[hand.particle_a]
-                        .velocity =
-                            (hand.rest_a
-                             - previous_component_centers[a_index])
-                            / dt;
+                    articulation.masses = {
+                        0.5,
+                        0.5
+                    };
 
-                    hand.motion
-                        .particles()[hand.particle_b]
-                        .velocity =
-                            (hand.rest_b
-                             - previous_component_centers[b_index])
-                            / dt;
+                    articulation.ground_radius =
+                        args.voxel_size * 0.47;
 
-                    hand.motion.add_structural_constraint(
-                        hand.particle_a,
-                        hand.particle_b,
-                        1e-9);
+                    articulation.restitution = 0.08;
+                    articulation.tangential_damping = 0.64;
+                    articulation.contact_velocity_scale = 0.20;
+                    articulation.global_velocity_damping = 0.994;
+                    articulation.contact_iterations = 8;
+                    articulation.substeps = 6;
+                    articulation.solver_iterations = 14;
+
+                    hand.articulation.initialize(
+                        articulation,
+                        dt);
 
                     detached_frame = frame;
                     detached_hand =
@@ -833,10 +639,9 @@ int main(int argc, char** argv) {
             if (detached_hand
                 && frame > detached_frame) {
 
-                step_detached_hand(
-                    *detached_hand,
-                    dt,
-                    args.voxel_size);
+                detached_hand
+                    ->articulation
+                    .step(dt);
             }
 
             const auto motion_viability =
@@ -989,7 +794,8 @@ int main(int argc, char** argv) {
         if (args.require_ground_contact
             && (!detached_hand
                 || !detached_hand
-                    ->ever_grounded)) {
+                    ->articulation
+                    .ever_grounded())) {
             throw std::runtime_error(
                 "detached voxel hand never hit the ground");
         }
@@ -1038,12 +844,14 @@ int main(int argc, char** argv) {
             << " hand_ground_contacts="
             << (detached_hand
                 ? detached_hand
-                    ->ground_contacts
+                    ->articulation
+                    .ground_contacts()
                 : 0)
             << " hand_max_rotation_rad="
             << (detached_hand
                 ? detached_hand
-                    ->max_rotation_radians
+                    ->articulation
+                    .segment_rotation_radians(0)
                 : 0.0)
             << " unrelated_changed_voxels="
             << unrelated_changed_voxels
