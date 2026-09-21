@@ -650,6 +650,172 @@ void test_embedded_child_bone_uses_rig_parent() {
           "embedded child should automatically capture nearby physical particles");
 }
 
+
+double signed_tet_volume(
+    const Vec3& p0,
+    const Vec3& p1,
+    const Vec3& p2,
+    const Vec3& p3) {
+    return sarx::dot(p1 - p0, sarx::cross(p2 - p0, p3 - p0)) / 6.0;
+}
+
+void test_material_frame_follows_deformation() {
+    Body body;
+    DamageSystem damage;
+
+    constexpr sarx::MaterialId fibers = 20;
+    MaterialResponse material;
+    material.cut_resistance = 1.0;
+    material.blunt_resistance = 1.0;
+    material.fiber_direction = {1.0, 0.0, 0.0};
+    material.longitudinal_cut_multiplier = 2.0;
+    material.transverse_cut_multiplier = 0.5;
+    damage.materials().set(fibers, material);
+
+    const auto p0 = body.add_particle({-0.5, 0.0, 0.0});
+    const auto p1 = body.add_particle({0.5, 0.0, 0.0});
+    const auto link =
+        body.add_structural_constraint(p0, p1, 0.0, 1.0, fibers);
+
+    check(sarx::nearly_equal(
+              body.structural_constraints()[link].rest_direction,
+              {1.0, 0.0, 0.0}),
+          "structural constraint should retain its rest material axis");
+
+    body.particles()[p0].position = {0.0, -0.5, 0.0};
+    body.particles()[p1].position = {0.0, 0.5, 0.0};
+
+    CapsuleDamage blade;
+    blade.a = {0.0, 0.0, -1.0};
+    blade.b = {0.0, 0.0, 1.0};
+    blade.radius = 0.1;
+    blade.energy = 0.8;
+    blade.mode = DamageMode::Cut;
+
+    const auto report = damage.apply_capsule(body, blade);
+    check(!report.events.empty(),
+          "deformed material-frame fixture should receive cut damage");
+    check(body.structural_constraints()[link].active,
+          "fiber direction should rotate with the deformed link and retain longitudinal resistance");
+    check(body.structural_constraints()[link].damage < 0.5,
+          "transported longitudinal fibers should reduce damage after a 90-degree body rotation");
+}
+
+void test_joint_capsule_extends_damage_geometry() {
+    Body body;
+    DamageSystem damage;
+
+    const auto root = body.add_bone(
+        sarx::kNoParent,
+        {0.0, 0.0, 0.0});
+    const auto child = body.add_bone(
+        root,
+        {1.0, 0.0, 0.0},
+        1.0,
+        sarx::kDefaultMaterial,
+        0.25);
+
+    CapsuleDamage blade;
+    blade.a = {0.5, -1.0, 0.20};
+    blade.b = {0.5, 1.0, 0.20};
+    blade.radius = 0.05;
+    blade.energy = 4.0;
+    blade.mode = DamageMode::Cut;
+
+    const auto report = damage.apply_capsule(body, blade);
+
+    check(report.broken_count() == 1,
+          "blade inside joint capsule radius should break the joint");
+    check(!body.bones()[child].joint_to_parent_active,
+          "joint capsule should make the parent-child link physically hittable away from its center line");
+}
+
+void test_joint_capsule_is_indexed_by_broad_phase() {
+    Body body;
+
+    const auto root = body.add_bone(
+        sarx::kNoParent,
+        {0.0, 0.0, 0.0});
+    const auto child = body.add_bone(
+        root,
+        {1.0, 0.0, 0.0},
+        1.0,
+        sarx::kDefaultMaterial,
+        0.25);
+
+    sarx::DamageBroadPhase broad_phase;
+    broad_phase.rebuild(body, 0.1);
+
+    SphereDamage query;
+    query.center = {0.5, 0.20, 0.0};
+    query.radius = 0.05;
+    query.energy = 1.0;
+
+    const auto result = broad_phase.query_sphere(query);
+
+    check(std::find(
+              result.candidates.bone_joints.begin(),
+              result.candidates.bone_joints.end(),
+              child) != result.candidates.bone_joints.end(),
+          "broad phase should index the full capsule AABB rather than only the joint center line");
+}
+
+void test_tetrahedral_volume_constraint_restores_volume() {
+    Body body;
+
+    const auto p0 = body.add_particle({0.0, 0.0, 0.0});
+    const auto p1 = body.add_particle({1.0, 0.0, 0.0});
+    const auto p2 = body.add_particle({0.0, 1.0, 0.0});
+    const auto p3 = body.add_particle({0.0, 0.0, 1.0});
+
+    const auto tet =
+        body.add_tetrahedral_constraint(p0, p1, p2, p3, 0.0);
+
+    const double rest =
+        body.tetrahedral_constraints()[tet].rest_volume;
+
+    body.particles()[p3].position = {0.0, 0.0, 1.6};
+    const double deformed = signed_tet_volume(
+        body.particles()[p0].position,
+        body.particles()[p1].position,
+        body.particles()[p2].position,
+        body.particles()[p3].position);
+
+    check(std::abs(deformed - rest) > 0.05,
+          "tet volume fixture should begin substantially deformed");
+
+    body.step(1.0 / 60.0, no_gravity());
+
+    const double corrected = signed_tet_volume(
+        body.particles()[p0].position,
+        body.particles()[p1].position,
+        body.particles()[p2].position,
+        body.particles()[p3].position);
+
+    check(std::abs(corrected - rest) < 1e-6,
+          "zero-compliance tetrahedral XPBD constraint should restore signed rest volume");
+}
+
+void test_voxel_lattice_generates_tetrahedral_cells() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 3;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.5;
+    spec.include_diagonals = false;
+    spec.include_tetrahedra = true;
+
+    const auto lattice = sarx::build_voxel_lattice(spec);
+
+    check(lattice.body.tetrahedral_constraints().size() == 48,
+          "3x3x3 lattice should generate six tetrahedra for each of eight cells");
+
+    for (const auto& tet : lattice.body.tetrahedral_constraints()) {
+        check(std::abs(tet.rest_volume) > 1e-12,
+              "generated tetrahedra must have non-zero signed rest volume");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -670,12 +836,17 @@ int main() {
     test_voxel_lattice_diagonal_connectivity();
     test_automatic_bone_embedding();
     test_embedded_child_bone_uses_rig_parent();
+    test_material_frame_follows_deformation();
+    test_joint_capsule_extends_damage_geometry();
+    test_joint_capsule_is_indexed_by_broad_phase();
+    test_tetrahedral_volume_constraint_restores_volume();
+    test_voxel_lattice_generates_tetrahedral_cells();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
         return EXIT_FAILURE;
     }
 
-    std::cout << "SARX V0.4A tests passed.\n";
+    std::cout << "SARX V0.4B mechanics tests passed.\n";
     return EXIT_SUCCESS;
 }
