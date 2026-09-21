@@ -55,14 +55,10 @@ jobs:
           }
 
           run_case CMU_Limp build/cmu_limp_frames build/cmu_limp.log build/cmu_limp.status
-          run_case CMU_WalkWoundedLeg build/cmu_wounded_leg_frames build/cmu_wounded_leg.log build/cmu_wounded_leg.status
-          run_case CMU_PainfulLeftKnee build/cmu_painful_knee_frames build/cmu_painful_knee.log build/cmu_painful_knee.status
 
-          if [[ "$(cat build/cmu_limp.status)" != "0" ]] \
-            && [[ "$(cat build/cmu_wounded_leg.status)" != "0" ]] \
-            && [[ "$(cat build/cmu_painful_knee.status)" != "0" ]]
+          if [[ "$(cat build/cmu_limp.status)" != "0" ]]
           then
-            echo "No authored injury candidate passed the foot-loss gates."
+            echo "Certified CMU Limp failed the complete-foot-loss gates."
             exit 1
           fi
 
@@ -78,20 +74,7 @@ jobs:
             ffmpeg -y               -framerate 30               -i "${frames}/frame_%04d.ppm"               -c:v libx264               -pix_fmt yuv420p               -crf 20               "${output}"
           }
 
-          encode build/cmu_limp_frames build/media/v15a_cmu_limp.mp4
-          encode build/cmu_wounded_leg_frames build/media/v15b_cmu_walk_wounded_leg.mp4
-          encode build/cmu_painful_knee_frames build/media/v15c_cmu_painful_left_knee.mp4
-
-          ffmpeg -y \
-            -i build/media/v15a_cmu_limp.mp4 \
-            -i build/media/v15b_cmu_walk_wounded_leg.mp4 \
-            -i build/media/v15c_cmu_painful_left_knee.mp4 \
-            -filter_complex "[0:v]scale=640:480[a];[1:v]scale=640:480[b];[2:v]scale=640:480[c];[a][b][c]hstack=inputs=3[v]" \
-            -map "[v]" \
-            -c:v libx264 \
-            -pix_fmt yuv420p \
-            -crf 20 \
-            build/media/v15_cmu_injury_comparison.mp4
+          encode build/cmu_limp_frames build/media/v16_cmu_limp_complete_foot_loss.mp4
 
       - name: Record authored injury provenance
         shell: bash
@@ -105,14 +88,6 @@ jobs:
             echo "[CMU_Limp]"
             cat build/cmu_limp.log
             echo "status=$(cat build/cmu_limp.status)"
-            echo
-            echo "[CMU_WalkWoundedLeg]"
-            cat build/cmu_wounded_leg.log
-            echo "status=$(cat build/cmu_wounded_leg.status)"
-            echo
-            echo "[CMU_PainfulLeftKnee]"
-            cat build/cmu_painful_knee.log
-            echo "status=$(cat build/cmu_painful_knee.status)"
           } > build/media/authored-injury-provenance.txt
 
       - name: Upload authored injury evidence
@@ -120,9 +95,6 @@ jobs:
         with:
           name: sarx-authored-injury-motion-media
           path: |
-            build/media/v15a_cmu_limp.mp4
-            build/media/v15b_cmu_walk_wounded_leg.mp4
-            build/media/v15c_cmu_painful_left_knee.mp4
-            build/media/v15_cmu_injury_comparison.mp4
+            build/media/v16_cmu_limp_complete_foot_loss.mp4
             build/media/authored-injury-provenance.txt
           if-no-files-found: error
