@@ -492,11 +492,15 @@ int main(int argc, char** argv) {
         sarx::Vec3 transition_world_offset{};
         sarx::Vec3 transition_core_center{};
         sarx::Vec3 injury_initial_core_center{};
+        sarx::Vec3 transition_lateral_axis{};
 
         double max_authored_pose_rms = 0.0;
         double max_floor_projection = 0.0;
         double max_camera_tracking_error = 0.0;
         double min_head_above_pelvis =
+            std::numeric_limits<double>::infinity();
+
+        double min_facing_alignment =
             std::numeric_limits<double>::infinity();
 
         std::size_t right_support_contacts = 0;
@@ -784,6 +788,65 @@ int main(int argc, char** argv) {
                     transition_core_center =
                         core_centroid(
                             transition_source_centers);
+
+                    auto region_centroid =
+                        [&](const std::vector<sarx::Vec3>& centers,
+                            const std::string& region) {
+
+                            sarx::Vec3 center{};
+                            std::size_t count = 0;
+
+                            for (std::size_t i = 0;
+                                 i < centers.size();
+                                 ++i) {
+
+                                if (voxel_character
+                                        .voxels()[i]
+                                        .state
+                                        != sarx::CharacterVoxelState::Attached
+                                    || voxel_character
+                                        .voxels()[i]
+                                        .anatomical_region
+                                        != region) {
+                                    continue;
+                                }
+
+                                center += centers[i];
+                                ++count;
+                            }
+
+                            if (count == 0) {
+                                throw std::runtime_error(
+                                    "authored injury transition missing region: "
+                                    + region);
+                            }
+
+                            return center
+                                / static_cast<double>(count);
+                        };
+
+                    transition_lateral_axis =
+                        region_centroid(
+                            transition_source_centers,
+                            "upperarm_l")
+                        - region_centroid(
+                            transition_source_centers,
+                            "upperarm_r");
+
+                    transition_lateral_axis.y = 0.0;
+
+                    const double transition_lateral_length =
+                        sarx::length(
+                            transition_lateral_axis);
+
+                    if (transition_lateral_length <= 1e-9) {
+                        throw std::runtime_error(
+                            "authored injury transition has degenerate facing axis");
+                    }
+
+                    transition_lateral_axis =
+                        transition_lateral_axis
+                        / transition_lateral_length;
 
                     const auto injury_initial_centers =
                         voxel_character.sample_centers(
@@ -1075,6 +1138,73 @@ int main(int argc, char** argv) {
                             head_center.y
                             - pelvis_center.y);
                 }
+
+                sarx::Vec3 left_upperarm{};
+                sarx::Vec3 right_upperarm{};
+                std::size_t left_upperarm_count = 0;
+                std::size_t right_upperarm_count = 0;
+
+                for (std::size_t i = 0;
+                     i < voxel_character.voxels().size();
+                     ++i) {
+
+                    const auto& voxel =
+                        voxel_character.voxels()[i];
+
+                    if (voxel.state
+                        != sarx::CharacterVoxelState::Attached) {
+                        continue;
+                    }
+
+                    if (voxel.anatomical_region
+                        == "upperarm_l") {
+                        left_upperarm += voxel_centers[i];
+                        ++left_upperarm_count;
+                    } else if (
+                        voxel.anatomical_region
+                        == "upperarm_r") {
+                        right_upperarm += voxel_centers[i];
+                        ++right_upperarm_count;
+                    }
+                }
+
+                if (left_upperarm_count > 0
+                    && right_upperarm_count > 0) {
+
+                    left_upperarm =
+                        left_upperarm
+                        / static_cast<double>(
+                            left_upperarm_count);
+
+                    right_upperarm =
+                        right_upperarm
+                        / static_cast<double>(
+                            right_upperarm_count);
+
+                    sarx::Vec3 lateral =
+                        left_upperarm
+                        - right_upperarm;
+
+                    lateral.y = 0.0;
+
+                    const double lateral_length =
+                        sarx::length(
+                            lateral);
+
+                    if (lateral_length > 1e-9) {
+                        lateral =
+                            lateral
+                            / lateral_length;
+
+                        min_facing_alignment =
+                            std::min(
+                                min_facing_alignment,
+                                lateral.x
+                                    * transition_lateral_axis.x
+                                + lateral.z
+                                    * transition_lateral_axis.z);
+                    }
+                }
             }
 
             sarx::CharacterMeshFrame visible =
@@ -1211,6 +1341,16 @@ int main(int argc, char** argv) {
         }
 
         if (args.require_limp
+            && (!std::isfinite(
+                    min_facing_alignment)
+                || min_facing_alignment < 0.70)) {
+            throw std::runtime_error(
+                "authored injury motion changed facing direction: "
+                + std::to_string(
+                    min_facing_alignment));
+        }
+
+        if (args.require_limp
             && (authored_evaluated_frames == 0
                 || authored_grounded_frames * 5
                     < authored_evaluated_frames)) {
@@ -1291,6 +1431,8 @@ int main(int argc, char** argv) {
             << authored_evaluated_frames
             << " min_head_above_pelvis="
             << min_head_above_pelvis
+            << " min_facing_alignment="
+            << min_facing_alignment
             << " max_authored_pose_rms="
             << max_authored_pose_rms
             << " max_floor_projection="
