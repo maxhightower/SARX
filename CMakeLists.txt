@@ -171,6 +171,7 @@ if (SARX_BUILD_TESTS)
                 --require-detachment
                 --require-anatomical-isolation
                 --require-walk-viability
+                --require-stable-camera
         )
 
         add_test(
@@ -188,6 +189,7 @@ if (SARX_BUILD_TESTS)
                 --require-detachment
                 --require-walk-invalidation
                 --require-anatomical-isolation
+                --require-stable-camera
         )
 
         add_test(
