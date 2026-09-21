@@ -69,7 +69,8 @@ VoxelLattice build_voxel_lattice(
         throw std::invalid_argument("voxel lattice spacing/mass must be positive");
     }
     if (spec.structural_compliance < 0.0
-        || spec.structural_break_damage <= 0.0) {
+        || spec.structural_break_damage <= 0.0
+        || spec.volume_compliance < 0.0) {
         throw std::invalid_argument("invalid voxel lattice structural parameters");
     }
 
@@ -152,6 +153,51 @@ VoxelLattice build_voxel_lattice(
         }
     }
 
+    if (spec.include_tetrahedra) {
+        for (std::size_t z = 0; z + 1 < spec.nz; ++z) {
+            for (std::size_t y = 0; y + 1 < spec.ny; ++y) {
+                for (std::size_t x = 0; x + 1 < spec.nx; ++x) {
+                    const ParticleId v000 = lattice.particle(x, y, z);
+                    const ParticleId v100 = lattice.particle(x + 1, y, z);
+                    const ParticleId v010 = lattice.particle(x, y + 1, z);
+                    const ParticleId v110 = lattice.particle(x + 1, y + 1, z);
+                    const ParticleId v001 = lattice.particle(x, y, z + 1);
+                    const ParticleId v101 = lattice.particle(x + 1, y, z + 1);
+                    const ParticleId v011 = lattice.particle(x, y + 1, z + 1);
+                    const ParticleId v111 = lattice.particle(x + 1, y + 1, z + 1);
+
+                    const Vec3 cell_center =
+                        spec.origin + Vec3{
+                            (static_cast<double>(x) + 0.5) * spec.spacing,
+                            (static_cast<double>(y) + 0.5) * spec.spacing,
+                            (static_cast<double>(z) + 0.5) * spec.spacing
+                        };
+                    const MaterialId material =
+                        material_at(cell_center, spec.default_material, regions);
+
+                    const std::array<std::array<ParticleId, 4>, 6> tets{{
+                        {v000, v100, v110, v111},
+                        {v000, v110, v010, v111},
+                        {v000, v010, v011, v111},
+                        {v000, v011, v001, v111},
+                        {v000, v001, v101, v111},
+                        {v000, v101, v100, v111}
+                    }};
+
+                    for (const auto& tet : tets) {
+                        lattice.body.add_tetrahedral_constraint(
+                            tet[0],
+                            tet[1],
+                            tet[2],
+                            tet[3],
+                            spec.volume_compliance,
+                            material);
+                    }
+                }
+            }
+        }
+    }
+
     return lattice;
 }
 
@@ -164,7 +210,8 @@ EmbeddedBoneResult embed_bone(
     double attachment_break_damage,
     MaterialId attachment_material,
     double joint_break_damage,
-    MaterialId joint_material) {
+    MaterialId joint_material,
+    double joint_radius) {
 
     if (influence_radius <= 0.0) {
         throw std::invalid_argument("bone influence radius must be positive");
@@ -175,7 +222,8 @@ EmbeddedBoneResult embed_bone(
         parent,
         animated_position,
         joint_break_damage,
-        joint_material);
+        joint_material,
+        joint_radius);
 
     const double radius_sq = influence_radius * influence_radius;
 
