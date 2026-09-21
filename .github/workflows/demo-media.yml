@@ -6,6 +6,12 @@ on:
     paths:
       - "tools/sarx_severance_demo.cpp"
       - "tools/sarx_humanoid_demo.cpp"
+      - "tools/sarx_character_demo.cpp"
+      - "src/gltf_character.cpp"
+      - "include/sarx/gltf_character.hpp"
+      - "src/character_render.cpp"
+      - "include/sarx/character_render.hpp"
+      - "assets/quaternius/**"
       - "src/humanoid.cpp"
       - "include/sarx/humanoid.hpp"
       - "src/debug_render.cpp"
@@ -43,6 +49,7 @@ jobs:
         run: |
           cmake --build build --config Release --target sarx_severance_demo
           cmake --build build --config Release --target sarx_humanoid_demo
+          cmake --build build --config Release --target sarx_character_demo
 
       - name: Render bridge frames
         run: |
@@ -57,6 +64,16 @@ jobs:
             --output build/humanoid_frames \
             --frames 150 \
             --cut-frame 60 | tee build/humanoid.log
+
+      - name: Render real skinned walk frames
+        run: |
+          ./build/sarx_character_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --clip Walk \
+            --output build/character_frames \
+            --frames 180 \
+            --fps 30 | tee build/character.log
 
       - name: Encode MP4s
         run: |
@@ -76,6 +93,14 @@ jobs:
             -pix_fmt yuv420p \
             -crf 20 \
             build/media/v04d_humanoid_shoulder_severance.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/character_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v05_real_character_walk.mp4
 
       - name: Encode GIF previews
         run: |
@@ -101,6 +126,17 @@ jobs:
             -lavfi "fps=15,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse" \
             build/media/v04d_humanoid_shoulder_severance.gif
 
+          ffmpeg -y \
+            -i build/media/v05_real_character_walk.mp4 \
+            -vf "fps=15,scale=720:-1:flags=lanczos,palettegen" \
+            build/media/palette_character.png
+
+          ffmpeg -y \
+            -i build/media/v05_real_character_walk.mp4 \
+            -i build/media/palette_character.png \
+            -lavfi "fps=15,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse" \
+            build/media/v05_real_character_walk.gif
+
       - name: Record provenance
         run: |
           {
@@ -116,16 +152,21 @@ jobs:
             echo
             echo "[humanoid demo log]"
             cat build/humanoid.log
+            echo
+            echo "[real skinned character walk log]"
+            cat build/character.log
           } > build/media/provenance.txt
 
       - name: Upload prototype media
         uses: actions/upload-artifact@v4
         with:
-          name: sarx-v04c-arm-severance-media
+          name: sarx-character-integration-media
           path: |
             build/media/v04c_arm_severance.mp4
             build/media/v04c_arm_severance.gif
             build/media/v04d_humanoid_shoulder_severance.mp4
             build/media/v04d_humanoid_shoulder_severance.gif
+            build/media/v05_real_character_walk.mp4
+            build/media/v05_real_character_walk.gif
             build/media/provenance.txt
           if-no-files-found: error
