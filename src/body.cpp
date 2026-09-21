@@ -59,13 +59,14 @@ BoneId Body::add_bone(
     BoneId parent,
     const Vec3& animated_position,
     double joint_break_damage,
-    MaterialId joint_material) {
+    MaterialId joint_material,
+    double joint_radius) {
 
     if (parent != kNoParent && parent >= bones_.size()) {
         throw std::out_of_range("bone parent must already exist");
     }
-    if (joint_break_damage <= 0.0) {
-        throw std::invalid_argument("joint break damage must be positive");
+    if (joint_break_damage <= 0.0 || joint_radius < 0.0) {
+        throw std::invalid_argument("invalid joint parameters");
     }
 
     Bone bone;
@@ -73,6 +74,7 @@ BoneId Body::add_bone(
     bone.animated_position = animated_position;
     bone.joint_break_damage = joint_break_damage;
     bone.joint_material = joint_material;
+    bone.joint_radius = joint_radius;
     bones_.push_back(bone);
     return bones_.size() - 1;
 }
@@ -94,12 +96,57 @@ ConstraintId Body::add_structural_constraint(
     StructuralConstraint c;
     c.a = a;
     c.b = b;
-    c.rest_length = length(particles_[b].position - particles_[a].position);
+    const Vec3 rest_delta = particles_[b].position - particles_[a].position;
+    c.rest_length = length(rest_delta);
+    c.rest_direction = normalized(rest_delta);
     c.compliance = compliance;
     c.break_damage = break_damage;
     c.material = material;
     structural_.push_back(c);
     return structural_.size() - 1;
+}
+
+ConstraintId Body::add_tetrahedral_constraint(
+    ParticleId a,
+    ParticleId b,
+    ParticleId c,
+    ParticleId d,
+    double compliance,
+    MaterialId material) {
+
+    const std::size_t n = particles_.size();
+    if (a >= n || b >= n || c >= n || d >= n
+        || a == b || a == c || a == d
+        || b == c || b == d || c == d) {
+        throw std::out_of_range("invalid tetrahedral constraint particles");
+    }
+    if (compliance < 0.0) {
+        throw std::invalid_argument("tetrahedral compliance must be non-negative");
+    }
+
+    const Vec3& p0 = particles_[a].position;
+    const Vec3& p1 = particles_[b].position;
+    const Vec3& p2 = particles_[c].position;
+    const Vec3& p3 = particles_[d].position;
+    const double rest_volume =
+        dot(p1 - p0, cross(p2 - p0, p3 - p0)) / 6.0;
+
+    if (std::abs(rest_volume) <= 1e-12) {
+        throw std::invalid_argument("tetrahedral rest volume must be non-zero");
+    }
+
+    tetrahedral_.push_back(TetrahedralConstraint{
+        a,
+        b,
+        c,
+        d,
+        rest_volume,
+        compliance,
+        0.0,
+        true,
+        material
+    });
+    return tetrahedral_.size() - 1;
 }
 
 ConstraintId Body::add_attachment(
@@ -189,6 +236,11 @@ void Body::damage_bone_joint(BoneId bone, double amount) {
 void Body::break_structural(ConstraintId constraint) {
     const auto& c = structural_.at(constraint);
     damage_structural(constraint, std::max(0.0, c.break_damage - c.damage));
+}
+
+void Body::break_tetrahedral(ConstraintId constraint) {
+    tetrahedral_.at(constraint).active = false;
+    tetrahedral_.at(constraint).lambda = 0.0;
 }
 
 void Body::break_attachment(ConstraintId constraint) {
@@ -306,10 +358,12 @@ void Body::step(double dt, const StepConfig& config) {
         }
 
         for (auto& c : structural_) c.lambda = 0.0;
+        for (auto& t : tetrahedral_) t.lambda = 0.0;
         for (auto& a : attachments_) a.lambda = {};
 
         for (int iteration = 0; iteration < config.solver_iterations; ++iteration) {
             solve_structural(h);
+            solve_tetrahedral(h);
             solve_attachments(h);
         }
 
@@ -346,6 +400,49 @@ void Body::solve_structural(double h) {
 
         a.position += (-n) * (a.inverse_mass * dlambda);
         b.position += n * (b.inverse_mass * dlambda);
+    }
+}
+
+void Body::solve_tetrahedral(double h) {
+    for (auto& t : tetrahedral_) {
+        if (!t.active) continue;
+
+        auto& p0 = particles_[t.a];
+        auto& p1 = particles_[t.b];
+        auto& p2 = particles_[t.c];
+        auto& p3 = particles_[t.d];
+
+        const Vec3 e10 = p1.position - p0.position;
+        const Vec3 e20 = p2.position - p0.position;
+        const Vec3 e30 = p3.position - p0.position;
+
+        const double volume = dot(e10, cross(e20, e30)) / 6.0;
+        const double C = volume - t.rest_volume;
+
+        const Vec3 g1 = cross(e20, e30) / 6.0;
+        const Vec3 g2 = cross(e30, e10) / 6.0;
+        const Vec3 g3 = cross(e10, e20) / 6.0;
+        const Vec3 g0 = -(g1 + g2 + g3);
+
+        const double weighted_gradient =
+            p0.inverse_mass * length_squared(g0)
+            + p1.inverse_mass * length_squared(g1)
+            + p2.inverse_mass * length_squared(g2)
+            + p3.inverse_mass * length_squared(g3);
+
+        const double alpha = t.compliance / (h * h);
+        const double denom = weighted_gradient + alpha;
+        if (denom <= 1e-12) {
+            continue;
+        }
+
+        const double dlambda = (-C - alpha * t.lambda) / denom;
+        t.lambda += dlambda;
+
+        p0.position += g0 * (p0.inverse_mass * dlambda);
+        p1.position += g1 * (p1.inverse_mass * dlambda);
+        p2.position += g2 * (p2.inverse_mass * dlambda);
+        p3.position += g3 * (p3.inverse_mass * dlambda);
     }
 }
 
