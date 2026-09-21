@@ -1,161 +1,182 @@
-# SARX V0 Architecture
+# SARX Reference Architecture
 
 ## Purpose
 
-SARX is a deterministic reference model for the coupling layer missing between conventional skeletal animation and real-time topology-changing deformable simulation.
+SARX is a deterministic reference model for the coupling layer between conventional skeletal animation and real-time topology-changing deformable simulation.
 
-The CPU implementation exists to make semantics precise before GPU migration.
+The CPU implementation defines authoritative semantics before those semantics are migrated to GPU compute.
 
 ## Core representations
 
-### 1. Animation rig
+### Animation rig
 
-Bones contain an animated world-space target and a parent relationship. Parent joints carry progressive damage, a break threshold, and a material ID. A bone only has animation authority while it can still reach a root through active parent links.
+Bones expose animated world-space targets and parent relationships. Parent joints carry progressive damage, break thresholds, and material IDs. A bone only retains animation authority while it can reach a root through active parent links.
 
-This is the first form of a **dynamic rig island**.
+### Physical particles
 
-### 2. Physical particles
+Particles own physical position, velocity, and inverse mass. Animation never writes particle positions directly.
 
-Particles own physical position, velocity, and inverse mass. Animation never writes positions directly.
+### Structural constraints
 
-### 3. Structural constraints
+Structural constraints connect pairs of particles and store rest length, compliance, XPBD multiplier, progressive damage, break threshold, material ID, and active topology state.
 
-Structural constraints connect pairs of physical particles. They store:
+### Breakable animation attachments
 
-- rest length,
-- compliance,
-- accumulated XPBD multiplier,
-- progressive damage,
-- break threshold,
-- active/inactive topology state,
-- material ID.
+Attachments couple physical particles to bone targets through compliant constraints. Their own damage state can fail independently of structural tissue.
 
-Failure modifies the physical connectivity graph rather than editing a render mesh.
+## Dynamic islands
 
-### 4. Breakable animation attachments
+Physical connectivity is computed only from active structural constraints. Each connected component reports its particles, mass, linear momentum, and whether a surviving attachment reaches a root-connected bone.
 
-An attachment couples a physical particle to a bone target through a compliant positional constraint. It has progressive damage, a break threshold, and a material ID.
+A component with no root-connected attachment is a free dynamic island. Topology changes never reset its velocity, so detachment preserves existing motion.
 
-An attachment is solved only when:
+## Spatial damage authority
 
-1. the attachment itself remains intact, and
-2. its bone is still connected to a rig root.
+SARX supports capsule/blade sweeps and spherical damage volumes. Spatial primitives are tested against:
 
-Animation is therefore a physical influence, not absolute authority.
+1. particle-to-particle structural segments,
+2. particle-to-bone-target attachment segments,
+3. parent-target-to-child-target rig-joint segments.
 
-## V0.2 spatial damage authority
+Damage authority remains in the exact router: geometry establishes contact, material response converts event energy into damage, and body state decides whether a threshold was crossed.
 
-Spatial damage converts world-space geometry into damage on the constraint graph.
+## V0.3 deterministic event stream
 
-SARX currently supports:
+Every damage operation receives a `DamageEventId`.
 
-- capsule/blade sweeps,
-- spherical damage volumes,
-- cut versus blunt damage modes,
-- material-dependent cut/blunt resistance,
-- progressive sub-threshold damage,
-- fracture event records.
+If a caller supplies an ID, SARX preserves it. If the ID is zero, the damage system allocates one monotonically. Applied operations are recorded as replayable commands.
 
-A damage primitive is tested against three live geometric representations:
+The same command stream can be applied to an identical initial body to reproduce accumulated damage and topology. This is the intended future contract for:
 
-1. a structural constraint is represented by its particle-to-particle segment,
-2. an animation attachment is represented by its particle-to-target segment,
-3. a bone joint is represented by its parent-target-to-child-target segment.
+- deterministic debugging,
+- save/replay ledgers,
+- multiplayer authority experiments,
+- CPU/GPU parity testing.
 
-The router computes proximity, converts event energy into normalized damage using material resistance, applies that damage to the authoritative body state, and records the result.
+Strain-driven failures use the same event stream as spatial weapon/impact damage.
 
-This means severance no longer needs an anatomy-specific command such as "remove arm." A blade crossing the shoulder can independently break both the physical bridge and the rig parent link because both occupy intersected world-space segments.
+## V0.3 anisotropic materials
 
-## Material response
+A material can optionally define a world-space fiber direction plus separate longitudinal and transverse cut multipliers.
 
-Materials currently define:
+For a structural/attachment/joint segment, effective cut resistance is interpolated from the squared alignment between the target segment and the fiber direction.
 
-- cut resistance,
-- blunt resistance.
+This lets the same blade energy produce different outcomes when cutting:
 
-This is intentionally minimal. Later material models can add anisotropy, tensile/shear/compressive response, strain-rate effects, fracture toughness, and fiber direction without changing the spatial damage contract.
+- along strong fibers,
+- across fibers.
+
+The current reference uses world-space fibers for simplicity. A later anatomical representation should transport local material frames with the deforming body.
+
+## V0.3 strain-driven failure
+
+Structural constraints can now fail without an external spatial event.
+
+Material response defines:
+
+- tensile yield strain,
+- tensile break strain,
+- progressive strain-damage rate.
+
+Below yield, no damage is added. Between yield and break, damage accumulates over time. At or above break strain, the structural constraint fails immediately.
+
+This provides two important regimes:
+
+- ductile/progressive tissue tearing,
+- brittle fracture-like failure.
 
 ## Fracture events
 
-Every touched target can emit a `FractureEvent` containing:
+Each touched target can emit a `FractureEvent` containing:
 
+- event ID,
+- source (spatial or strain),
 - target kind,
 - target ID,
 - material ID,
-- approximate world-space hit position,
+- world-space position,
 - applied damage,
-- whether this event crossed the failure threshold.
+- whether the event crossed the failure threshold.
 
-These events are the synchronization boundary for later systems such as:
+These events synchronize downstream systems without making those systems authoritative over topology.
 
-- wound rendering,
-- particles/fluids,
-- audio,
-- gameplay damage,
-- GPU topology updates,
-- replay/debug ledgers.
+## Persistent wound descriptors
 
-## Detachment semantics
+A successful cut can create a persistent `WoundDescriptor` containing:
 
-A body is partitioned into connected components using only active structural constraints.
+- originating event ID,
+- wound center,
+- optional normalized cut-surface normal,
+- radius,
+- number of authoritative targets broken.
 
-For each component SARX computes:
+Fracture events answer **what failed**. Wound descriptors answer **what persistent cut surface downstream rendering/fluids should continue representing**.
 
-- member particles,
-- total mass,
-- linear momentum,
-- whether any surviving attachment reaches a root-connected bone.
+## V0.3 damage broad phase
 
-A component with no root-connected attachment is a **free dynamic island**.
+A `DamageBroadPhase` uniform grid caches the current pose's damage-receiving segments.
 
-No velocity reset occurs when topology changes. Severance therefore preserves the physical state present at the moment of detachment.
+The grid indexes:
 
-## Reference transition
+- active structural constraints,
+- active animation attachments,
+- active parent-child bone joints.
 
-An intact limb has both:
+A local capsule/sphere query produces a `DamageCandidates` set. Only those IDs are passed to the exact damage router.
 
-- a structural path to the torso, and
-- a rig path to the root.
+The broad phase does **not** decide intersection, damage, or fracture. It can only reject distant primitives. Therefore full-scan and candidate-restricted execution are required to produce identical authoritative outcomes.
 
-A spatial cut can now destroy those paths automatically.
+The cache is explicit because the body is deformable: callers rebuild it when the indexed pose has changed enough to invalidate its cells. Future GPU work can replace this with incremental/refit structures.
+
+## Current reference transition
 
     animated + connected
             |
-            | spatial blade event
+            | spatial cut OR physical overstrain
             v
-    material-aware damage routing
-        /               \
-physical bridge      rig joint
-   failure             failure
-        \               /
-         dynamic island
+       deterministic event
+            |
+            v
+    material-aware failure
+      /        |        \
+ structure  attachment  rig joint
+      \        |        /
+       surviving connectivity
               |
-              v
-        free simulation
+        connected components
+              |
+      root authority test
+         /          \
+ animated island   free island
 
 ## Why CPU first?
 
-The eventual target is a GPU-oriented solver, but the CPU implementation establishes a small authoritative specification for:
+The eventual target is GPU-oriented, but the CPU implementation is the authoritative specification for:
 
-- compliance behavior,
-- material response,
-- break thresholds,
+- XPBD coupling behavior,
+- damage thresholds,
+- anisotropic material response,
+- progressive/brittle strain failure,
 - graph partitioning,
 - rig authority,
 - momentum-preserving handoff,
 - spatial damage routing,
-- fracture-event ordering/contents.
+- deterministic event ordering,
+- replay,
+- wound creation,
+- broad-phase parity.
 
-A future GPU implementation should be tested for parity against this reference model.
+A GPU implementation should be tested against this reference rather than independently redefining these semantics.
 
 ## Next milestone
 
-V0.3 should make the damage model mechanically richer:
+V0.4 should move from a generic constraint graph toward an actual destructible volumetric character fixture:
 
-- anisotropic tissue response,
-- strain-driven spontaneous tearing,
-- bone-like brittle fracture,
-- cut planes with persistent wound topology,
-- event IDs and deterministic replay,
-- broad-phase acceleration so damage does not scan every constraint,
-- active-damage-region bookkeeping as groundwork for GPU/adaptive simulation.
+- tetrahedral/voxelized volume construction,
+- material regions and local fiber frames,
+- bone embedding/attachment generation,
+- joint capsules,
+- local adaptive damage domains,
+- GPU-friendly SoA buffers,
+- CPU/GPU parity harness,
+- first visual debug renderer for particles, constraints, bones, cuts, and islands.
