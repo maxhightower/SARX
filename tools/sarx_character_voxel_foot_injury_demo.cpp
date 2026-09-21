@@ -1500,6 +1500,33 @@ int main(int argc, char** argv) {
             ++unrelated_changed_voxels;
         }
 
+        std::cout
+            << "SARX authored injury diagnostics:"
+            << " injury_motion="
+            << injury_character.animation_names()[injury_clip]
+            << " locomotion_strategy="
+            << sarx::motion_strategy_name(
+                locomotion_plan.strategy)
+            << " root_distance_m="
+            << injury_root_motion.total_distance_m()
+            << " max_right_leg_cycle="
+            << max_right_leg_cycle
+            << " max_left_leg_cycle="
+            << max_left_leg_cycle
+            << " min_stump_center_y="
+            << min_stump_center_y
+            << " stump_near_ground_frames="
+            << stump_near_ground_frames
+            << " grounded_frames="
+            << authored_grounded_frames
+            << "/"
+            << authored_evaluated_frames
+            << " min_head_above_pelvis="
+            << min_head_above_pelvis
+            << " min_facing_alignment="
+            << min_facing_alignment
+            << '\n';
+
         if (args.require_damage
             && destroyed_total == 0) {
             throw std::runtime_error(
