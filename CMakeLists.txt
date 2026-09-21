@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(SARX VERSION 0.3.0 LANGUAGES CXX)
+project(SARX VERSION 0.4.0 LANGUAGES CXX)
 
 option(SARX_BUILD_TESTS "Build SARX tests" ON)
 
@@ -7,6 +7,7 @@ add_library(sarx
     src/body.cpp
     src/damage.cpp
     src/broad_phase.cpp
+    src/volume.cpp
 )
 
 target_include_directories(sarx
