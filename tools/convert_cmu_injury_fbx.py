@@ -96,6 +96,25 @@ def main():
             f"CMU retarget mapped only {len(target_names)} major Quaternius bones"
         )
 
+    # SARX owns world/root translation. The source FBXs use CMU translation
+    # units/rest offsets that are not compatible with the SARX Quaternius
+    # character. Preserve the authored joint rotations, but let the target
+    # character's own rest translations/scales remain authoritative.
+    removed_transform_curves = 0
+    for action in bpy.data.actions:
+        for curve in list(action.fcurves):
+            path = curve.data_path
+            if (
+                path == "location"
+                or path == "scale"
+                or path.endswith(".location")
+                or path.endswith(".scale")
+            ):
+                action.fcurves.remove(curve)
+                removed_transform_curves += 1
+
+    print("SARX_CMU_REMOVED_TRANSLATION_SCALE_CURVES", removed_transform_curves)
+
     clip_key = source.stem
     clip_name = CLIP_NAMES.get(clip_key, f"CMU_{clip_key}")
 
