@@ -210,17 +210,31 @@ def main():
             @ target_bone.matrix_local
         )
 
-        orientation_offset = (
-            target_rest_world.to_quaternion()
-            @ source_rest_world.to_quaternion().inverted()
+        # Map a rotation expressed in the source bone's rest-space
+        # coordinates into the target bone's rest-space coordinates.
+        #
+        # Do NOT copy absolute source world orientation onto the target pose.
+        # That makes child world rotations look individually plausible while
+        # corrupting the target hierarchy (the first authored SARX evidence
+        # literally turned the whole character sideways/upside-down).
+        source_rest_rotation = (
+            source_rest_world.to_quaternion()
         )
-        orientation_offset.normalize()
+        target_rest_rotation = (
+            target_rest_world.to_quaternion()
+        )
+
+        source_to_target_basis = (
+            target_rest_rotation.inverted()
+            @ source_rest_rotation
+        )
+        source_to_target_basis.normalize()
 
         mapped.append(
             (
                 source_name,
                 target_name,
-                orientation_offset,
+                source_to_target_basis,
                 bone_depth(target_bone),
             )
         )
@@ -268,73 +282,48 @@ def main():
         scene.render.fps_base,
     )
 
-    target_world_inverse_rotation = (
-        target_armature.matrix_world
-        .to_quaternion()
-        .inverted()
-    )
-
     # Bake the authored source pose into the actual Quaternius target
     # coordinate frames.  Target bone translations/lengths remain those
     # of the Quaternius rest skeleton; only rotations are keyed.
     for frame in range(source_start, source_end + 1):
         scene.frame_set(frame)
 
-        for source_name, target_name, orientation_offset, _ in mapped:
+        for source_name, target_name, source_to_target_basis, _ in mapped:
             source_pose = source_armature.pose.bones.get(source_name)
             target_pose = target_armature.pose.bones.get(target_name)
-            target_bone = target_armature.data.bones.get(target_name)
 
             if (
                 source_pose is None
                 or target_pose is None
-                or target_bone is None
             ):
                 continue
 
-            source_pose_world = (
-                source_armature.matrix_world
-                @ source_pose.matrix
+            # matrix_basis is the animation delta relative to the source
+            # bone's own rest pose and parent.  Transfer that delta into
+            # the target bone's rest basis by conjugation, so Quaternius
+            # keeps its own hierarchy/rest orientation while inheriting
+            # the authored CMU motion.
+            source_delta = (
+                source_pose.matrix_basis
+                .to_quaternion()
             )
+            source_delta.normalize()
 
-            desired_world_rotation = (
-                orientation_offset
-                @ source_pose_world.to_quaternion()
+            target_delta = (
+                source_to_target_basis
+                @ source_delta
+                @ source_to_target_basis.inverted()
             )
-            desired_world_rotation.normalize()
+            target_delta.normalize()
 
-            desired_armature_rotation = (
-                target_world_inverse_rotation
-                @ desired_world_rotation
-            )
-            desired_armature_rotation.normalize()
+            target_pose.rotation_mode = "QUATERNION"
+            target_pose.rotation_quaternion = target_delta
 
-            if target_bone.parent is not None:
-                parent_pose = target_armature.pose.bones[
-                    target_bone.parent.name
-                ]
-
-                rest_relative = (
-                    target_bone.parent.matrix_local.inverted()
-                    @ target_bone.matrix_local
-                )
-
-                base_matrix = (
-                    parent_pose.matrix
-                    @ rest_relative
-                )
-            else:
-                base_matrix = target_bone.matrix_local.copy()
-
-            desired_matrix = (
-                desired_armature_rotation
-                .to_matrix()
-                .to_4x4()
-            )
-
-            desired_matrix.translation = base_matrix.translation
-
-            target_pose.matrix = desired_matrix
+            # Injury GLBs are rotation-only. Translation and scale stay
+            # at the Quaternius target rest values; world/root travel is
+            # owned by SARX's continuity layer.
+            target_pose.location = (0.0, 0.0, 0.0)
+            target_pose.scale = (1.0, 1.0, 1.0)
 
             target_pose.keyframe_insert(
                 data_path="rotation_quaternion",
