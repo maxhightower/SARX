@@ -173,12 +173,12 @@ int main(int argc, char** argv) {
         sarx::StepConfig step;
         step.substeps = 3;
         step.solver_iterations = 10;
-        step.gravity = {0.0, -3.0, 0.0};
+        step.gravity = {0.0, -0.45, 0.0};
 
         sarx::DebugCamera camera;
         camera.position = {2.8, 1.8, 3.1};
-        camera.target = {0.75, 0.10, 0.15};
-        camera.pixels_per_unit = 330.0;
+        camera.target = {0.75, -0.18, 0.15};
+        camera.pixels_per_unit = 285.0;
         camera.width = 960;
         camera.height = 540;
 
