@@ -11,6 +11,9 @@ on:
       - "tools/sarx_character_head_severance_demo.cpp"
       - "tools/sarx_character_voxel_demo.cpp"
       - "tools/sarx_character_voxel_thigh_demo.cpp"
+      - "tools/sarx_character_voxel_foot_limp_demo.cpp"
+      - "src/procedural_limp.cpp"
+      - "include/sarx/procedural_limp.hpp"
       - "src/voxel_character.cpp"
       - "include/sarx/voxel_character.hpp"
       - "src/motion_viability.cpp"
@@ -42,6 +45,9 @@ on:
       - "tools/sarx_character_head_severance_demo.cpp"
       - "tools/sarx_character_voxel_demo.cpp"
       - "tools/sarx_character_voxel_thigh_demo.cpp"
+      - "tools/sarx_character_voxel_foot_limp_demo.cpp"
+      - "src/procedural_limp.cpp"
+      - "include/sarx/procedural_limp.hpp"
       - "src/voxel_character.cpp"
       - "include/sarx/voxel_character.hpp"
       - "src/motion_viability.cpp"
@@ -84,6 +90,7 @@ jobs:
           cmake --build build --config Release --target sarx_character_head_severance_demo
           cmake --build build --config Release --target sarx_character_voxel_demo
           cmake --build build --config Release --target sarx_character_voxel_thigh_demo
+          cmake --build build --config Release --target sarx_character_voxel_foot_limp_demo
 
       - name: Render bridge frames
         run: |
@@ -197,6 +204,26 @@ jobs:
             --require-fall-transition \
             --require-grounded-recovery | tee build/character_voxel_thigh.log
 
+      - name: Render Quaternius procedural foot limp variants
+        run: |
+          set -o pipefail
+          common_args="--character assets/quaternius/character.glb --animations assets/quaternius/animations.glb --clip Walk --frames 240 --cut-frame 75 --fps 30 --voxel-size 0.045 --require-damage --require-detachment --require-walk-invalidation --require-limp --require-isolated-foot --require-ground-contact --require-stable-camera"
+
+          ./build/sarx_character_voxel_foot_limp_demo \
+            $common_args \
+            --variant guarded \
+            --output build/foot_limp_guarded_frames | tee build/foot_limp_guarded.log
+
+          ./build/sarx_character_voxel_foot_limp_demo \
+            $common_args \
+            --variant stiff-leg \
+            --output build/foot_limp_stiff_frames | tee build/foot_limp_stiff.log
+
+          ./build/sarx_character_voxel_foot_limp_demo \
+            $common_args \
+            --variant hop-step \
+            --output build/foot_limp_hop_frames | tee build/foot_limp_hop.log
+
       - name: Encode MP4s
         run: |
           mkdir -p build/media
@@ -271,6 +298,30 @@ jobs:
           cp \
             build/media/v09_quaternius_voxel_left_thigh_cut.mp4 \
             build/media/v11_quaternius_fall_to_grounded_recovery.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/foot_limp_guarded_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v12a_quaternius_foot_limp_guarded.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/foot_limp_stiff_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v12b_quaternius_foot_limp_stiff_leg.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/foot_limp_hop_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v12c_quaternius_foot_limp_hop_step.mp4
 
       - name: Encode GIF previews
         run: |
@@ -351,6 +402,15 @@ jobs:
             echo
             echo "[Quaternius voxel left-thigh severance log]"
             cat build/character_voxel_thigh.log
+            echo
+            echo "[Quaternius foot limp guarded log]"
+            cat build/foot_limp_guarded.log
+            echo
+            echo "[Quaternius foot limp stiff-leg log]"
+            cat build/foot_limp_stiff.log
+            echo
+            echo "[Quaternius foot limp hop-step log]"
+            cat build/foot_limp_hop.log
           } > build/media/provenance.txt
 
       - name: Upload prototype media
@@ -372,5 +432,8 @@ jobs:
             build/media/v09_quaternius_voxel_left_thigh_cut.mp4
             build/media/v10_quaternius_walk_failure_to_fall.mp4
             build/media/v11_quaternius_fall_to_grounded_recovery.mp4
+            build/media/v12a_quaternius_foot_limp_guarded.mp4
+            build/media/v12b_quaternius_foot_limp_stiff_leg.mp4
+            build/media/v12c_quaternius_foot_limp_hop_step.mp4
             build/media/provenance.txt
           if-no-files-found: error
