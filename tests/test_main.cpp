@@ -4,6 +4,7 @@
 #include "sarx/volume.hpp"
 #include "sarx/adaptive.hpp"
 #include "sarx/soa.hpp"
+#include "sarx/humanoid.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1563,6 +1564,80 @@ void test_plane_cut_cleanly_separates_generated_volume() {
           "replayed planar cut should reproduce the same topology split");
 }
 
+
+void test_humanoid_fixture_is_connected_and_shaped() {
+    const auto fixture = sarx::build_humanoid_fixture();
+
+    check(fixture.body.particles().size() > 250,
+          "humanoid fixture should generate a substantial sparse particle volume");
+    check(fixture.body.particles().size() < 2000,
+          "humanoid fixture should remain sparse rather than fill its bounding box");
+
+    check(fixture.body.structural_constraints().size()
+              > fixture.body.particles().size(),
+          "humanoid fixture should contain a connected structural network");
+
+    check(!fixture.body.tetrahedral_constraints().empty(),
+          "humanoid fixture should contain explicit volumetric tetrahedra");
+
+    const auto islands = fixture.body.islands();
+    check(islands.size() == 1,
+          "intact generated humanoid should begin as one physical island");
+
+    check(fixture.bones.right_shoulder != sarx::kNoParent
+              && fixture.bones.right_elbow != sarx::kNoParent
+              && fixture.bones.right_hand != sarx::kNoParent,
+          "humanoid fixture should expose a complete right-arm rig chain");
+}
+
+void test_humanoid_shoulder_cut_detaches_arm_cleanly() {
+    auto fixture = sarx::build_humanoid_fixture();
+    DamageSystem damage;
+
+    MaterialResponse tissue;
+    tissue.cut_resistance = 0.75;
+    tissue.blunt_resistance = 1.0;
+    damage.materials().set(1, tissue);
+
+    sarx::PlaneCutDamage cut;
+    cut.center = fixture.right_shoulder_cut_center;
+    cut.normal = fixture.right_shoulder_cut_normal;
+    cut.radius = fixture.right_shoulder_cut_radius;
+    cut.energy = 3.0;
+    cut.event_id = 5000;
+
+    const auto report =
+        damage.apply_plane_cut(fixture.body, cut);
+
+    check(report.broken_count() > 0,
+          "humanoid shoulder cut should break physical/rig topology");
+
+    const auto islands = fixture.body.islands();
+
+    check(islands.size() == 2,
+          "humanoid shoulder cut should create exactly body + detached arm islands");
+
+    std::size_t smaller = std::numeric_limits<std::size_t>::max();
+    std::size_t larger = 0;
+
+    for (const auto& island : islands) {
+        smaller = std::min(smaller, island.particles.size());
+        larger = std::max(larger, island.particles.size());
+    }
+
+    check(smaller > 10,
+          "detached humanoid arm should remain a coherent multi-particle volume");
+    check(larger > smaller,
+          "main humanoid body should remain the larger connected component");
+
+    check(!fixture.body.bone_root_connected(
+              fixture.bones.right_shoulder),
+          "right arm rig chain should lose root authority after shoulder cut");
+
+    check(damage.wounds().size() == 1,
+          "one humanoid shoulder plane cut should create one wound descriptor");
+}
+
 } // namespace
 
 int main() {
@@ -1602,6 +1677,8 @@ int main() {
     test_tetrahedral_cut_honors_capsule_radius();
     test_adaptive_domain_closes_over_detached_free_island();
     test_plane_cut_cleanly_separates_generated_volume();
+    test_humanoid_fixture_is_connected_and_shaped();
+    test_humanoid_shoulder_cut_detaches_arm_cleanly();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
