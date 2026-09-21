@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import bpy
+import csv
 import json
 import struct
 import sys
@@ -281,6 +282,22 @@ def main():
         scene.render.fps_base,
     )
 
+    source_root_pose = source_armature.pose.bones.get("hip")
+    if source_root_pose is None:
+        raise RuntimeError(f"{source.name} has no hip/root pose bone")
+
+    source_fps = (
+        float(scene.render.fps)
+        / float(scene.render.fps_base)
+    )
+
+    root_samples = []
+    root_start = None
+    root_previous = None
+    root_distance = 0.0
+    min_vertical = 0.0
+    max_vertical = 0.0
+
     # Bake the authored source pose into the actual Quaternius target
     # coordinate frames. Target bone translations/lengths remain those
     # of the Quaternius rest skeleton; only rotations are keyed.
@@ -291,6 +308,33 @@ def main():
     # animate the spine and limbs but may not silently rotate the agent.
     for frame in range(source_start, source_end + 1):
         scene.frame_set(frame)
+
+        root_world = (
+            source_armature.matrix_world
+            @ source_root_pose.matrix
+        ).translation.copy()
+
+        if root_start is None:
+            root_start = root_world.copy()
+            root_previous = root_world.copy()
+
+        dx = root_world.x - root_previous.x
+        dy = root_world.y - root_previous.y
+        root_distance += (dx * dx + dy * dy) ** 0.5
+
+        vertical = root_world.z - root_start.z
+        min_vertical = min(min_vertical, vertical)
+        max_vertical = max(max_vertical, vertical)
+
+        root_samples.append(
+            (
+                (frame - source_start) / source_fps,
+                root_distance,
+                vertical,
+            )
+        )
+
+        root_previous = root_world.copy()
 
         for source_name, target_name, source_to_target_basis, _ in mapped:
             source_pose = source_armature.pose.bones.get(source_name)
@@ -366,6 +410,27 @@ def main():
 
     strip_non_rotation_animation_channels(destination)
 
+    root_path = destination.with_suffix(".root.csv")
+    with root_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            [
+                "time_seconds",
+                "distance_m",
+                "vertical_m",
+            ]
+        )
+        writer.writerows(root_samples)
+
+    print(
+        "SARX_CMU_ROOT_TRAJECTORY",
+        clip_name,
+        f"samples={len(root_samples)}",
+        f"distance_m={root_distance:.9f}",
+        f"vertical_min_m={min_vertical:.9f}",
+        f"vertical_max_m={max_vertical:.9f}",
+        f"path={root_path}",
+    )
     print(
         "SARX_CMU_BAKED_RETARGET",
         clip_name,
