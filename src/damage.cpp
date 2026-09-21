@@ -766,14 +766,12 @@ DamageReport DamageSystem::apply_plane_cut(
             p1 - p0,
             rest_fiber);
 
-        const double amount = damage_from_distance(
-            hit.radial_distance_squared,
-            damage.radius,
-            damage.energy,
-            resistance_for(
+        const double amount =
+            damage.energy
+            / resistance_for(
                 material,
                 DamageMode::Cut,
-                p1 - p0));
+                p1 - p0);
         if (amount <= 0.0) continue;
 
         const bool was_active = constraint.active;
@@ -814,11 +812,8 @@ DamageReport DamageSystem::apply_plane_cut(
         if (!hit.hit) continue;
 
         const auto material = materials_.get(tet.material);
-        const double amount = damage_from_distance(
-            hit.radial_distance_squared,
-            damage.radius,
-            damage.energy,
-            material.cut_resistance);
+        const double amount =
+            damage.energy / material.cut_resistance;
         if (amount <= 0.0) continue;
 
         const bool was_active = tet.active;
@@ -858,14 +853,12 @@ DamageReport DamageSystem::apply_plane_cut(
         if (!hit.hit) continue;
 
         const auto material = materials_.get(attachment.material);
-        const double amount = damage_from_distance(
-            hit.radial_distance_squared,
-            damage.radius,
-            damage.energy,
-            resistance_for(
+        const double amount =
+            damage.energy
+            / resistance_for(
                 material,
                 DamageMode::Cut,
-                p1 - p0));
+                p1 - p0);
         if (amount <= 0.0) continue;
 
         const bool was_active = attachment.active;
@@ -907,14 +900,12 @@ DamageReport DamageSystem::apply_plane_cut(
 
         const auto material =
             materials_.get(bone.joint_material);
-        const double amount = damage_from_distance(
-            hit.radial_distance_squared,
-            damage.radius + bone.joint_radius,
-            damage.energy,
-            resistance_for(
+        const double amount =
+            damage.energy
+            / resistance_for(
                 material,
                 DamageMode::Cut,
-                p1 - p0));
+                p1 - p0);
         if (amount <= 0.0) continue;
 
         const bool was_active = bone.joint_to_parent_active;
