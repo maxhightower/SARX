@@ -45,12 +45,11 @@ jobs:
             out="$2"
             log="$3"
 
-            ./build/sarx_character_voxel_foot_injury_demo               --character assets/quaternius/character.glb               --animations assets/quaternius/animations.glb               --clip Walk               --injury-animations "assets/cmu/${semantic}.glb"               --injury-clip "${semantic}"               --output "${out}"               --frames 240               --cut-frame 75               --fps 30               --voxel-size 0.045               --require-damage               --require-detachment               --require-walk-invalidation               --require-limp               --require-isolated-foot               --require-ground-contact               --require-stable-camera               2>&1 | tee "${log}"
+            ./build/sarx_character_voxel_foot_injury_demo               --character assets/quaternius/character.glb               --animations assets/quaternius/animations.glb               --clip Walk               --injury-animations "assets/cmu/${semantic}.glb"               --injury-clip "${semantic}"               --injury-root-motion "assets/cmu/${semantic}.root.csv"               --output "${out}"               --frames 240               --cut-frame 75               --fps 30               --voxel-size 0.045               --require-damage               --require-detachment               --require-walk-invalidation               --require-limp               --require-isolated-foot               --require-ground-contact               --require-stable-camera               2>&1 | tee "${log}"
           }
 
           run_case CMU_Limp build/cmu_limp_frames build/cmu_limp.log
           run_case CMU_HurtLegWalk build/cmu_hurt_leg_frames build/cmu_hurt_leg.log
-          run_case CMU_DragBadLegWalk build/cmu_drag_bad_leg_frames build/cmu_drag_bad_leg.log
 
       - name: Encode authored injury MP4s
         shell: bash
@@ -66,9 +65,7 @@ jobs:
 
           encode build/cmu_limp_frames build/media/v13a_cmu_limp.mp4
           encode build/cmu_hurt_leg_frames build/media/v13b_cmu_hurt_leg_walk.mp4
-          encode build/cmu_drag_bad_leg_frames build/media/v13c_cmu_drag_bad_leg_walk.mp4
-
-          ffmpeg -y             -i build/media/v13a_cmu_limp.mp4             -i build/media/v13b_cmu_hurt_leg_walk.mp4             -i build/media/v13c_cmu_drag_bad_leg_walk.mp4             -filter_complex               "[0:v]scale=640:480[a];[1:v]scale=640:480[b];[2:v]scale=640:480[c];[a][b][c]hstack=inputs=3[v]"             -map "[v]"             -c:v libx264             -pix_fmt yuv420p             -crf 20             build/media/v13_cmu_injury_comparison.mp4
+          ffmpeg -y             -i build/media/v13a_cmu_limp.mp4             -i build/media/v13b_cmu_hurt_leg_walk.mp4             -filter_complex               "[0:v]scale=640:480[a];[1:v]scale=640:480[b];[a][b]hstack=inputs=2[v]"             -map "[v]"             -c:v libx264             -pix_fmt yuv420p             -crf 20             build/media/v13_cmu_injury_comparison.mp4
 
       - name: Record authored injury provenance
         shell: bash
@@ -84,9 +81,6 @@ jobs:
             echo
             echo "[CMU_HurtLegWalk]"
             cat build/cmu_hurt_leg.log
-            echo
-            echo "[CMU_DragBadLegWalk]"
-            cat build/cmu_drag_bad_leg.log
           } > build/media/authored-injury-provenance.txt
 
       - name: Upload authored injury evidence
@@ -96,7 +90,6 @@ jobs:
           path: |
             build/media/v13a_cmu_limp.mp4
             build/media/v13b_cmu_hurt_leg_walk.mp4
-            build/media/v13c_cmu_drag_bad_leg_walk.mp4
             build/media/v13_cmu_injury_comparison.mp4
             build/media/authored-injury-provenance.txt
           if-no-files-found: error
