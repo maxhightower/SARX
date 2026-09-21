@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(SARX VERSION 0.4.2 LANGUAGES CXX)
+project(SARX VERSION 0.4.3 LANGUAGES CXX)
 
 option(SARX_BUILD_TESTS "Build SARX tests" ON)
 
@@ -10,6 +10,7 @@ add_library(sarx
     src/volume.cpp
     src/adaptive.cpp
     src/soa.cpp
+    src/debug_render.cpp
 )
 
 target_include_directories(sarx
@@ -25,6 +26,12 @@ else()
     target_compile_options(sarx PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+add_executable(sarx_severance_demo
+    tools/sarx_severance_demo.cpp
+)
+target_link_libraries(sarx_severance_demo PRIVATE sarx)
+target_compile_features(sarx_severance_demo PRIVATE cxx_std_20)
+
 if (SARX_BUILD_TESTS)
     enable_testing()
 
@@ -35,4 +42,12 @@ if (SARX_BUILD_TESTS)
     target_compile_features(sarx_tests PRIVATE cxx_std_20)
 
     add_test(NAME sarx_tests COMMAND sarx_tests)
+
+    add_test(
+        NAME sarx_demo_smoke
+        COMMAND sarx_severance_demo
+            --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_demo_frames
+            --frames 5
+            --cut-frame 2
+    )
 endif()
