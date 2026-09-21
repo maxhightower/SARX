@@ -163,6 +163,8 @@ if (SARX_BUILD_TESTS)
                 --voxel-size 0.045
                 --require-damage
                 --require-detachment
+                --require-anatomical-isolation
+                --require-walk-viability
         )
 
         add_test(
