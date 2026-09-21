@@ -10,6 +10,7 @@ on:
       - "tools/sarx_character_severance_demo.cpp"
       - "tools/sarx_character_head_severance_demo.cpp"
       - "tools/sarx_character_voxel_demo.cpp"
+      - "tools/sarx_character_voxel_thigh_demo.cpp"
       - "src/voxel_character.cpp"
       - "include/sarx/voxel_character.hpp"
       - "src/gltf_character.cpp"
@@ -36,6 +37,7 @@ on:
       - "tools/sarx_character_severance_demo.cpp"
       - "tools/sarx_character_head_severance_demo.cpp"
       - "tools/sarx_character_voxel_demo.cpp"
+      - "tools/sarx_character_voxel_thigh_demo.cpp"
       - "src/voxel_character.cpp"
       - "include/sarx/voxel_character.hpp"
       - "src/gltf_character.cpp"
@@ -73,6 +75,7 @@ jobs:
           cmake --build build --config Release --target sarx_character_severance_demo
           cmake --build build --config Release --target sarx_character_head_severance_demo
           cmake --build build --config Release --target sarx_character_voxel_demo
+          cmake --build build --config Release --target sarx_character_voxel_thigh_demo
 
       - name: Render bridge frames
         run: |
@@ -164,6 +167,24 @@ jobs:
             --require-anatomical-isolation \
             --require-walk-viability | tee build/character_voxel.log
 
+      - name: Render Quaternius voxel left-thigh severance frames
+        run: |
+          set -o pipefail
+          ./build/sarx_character_voxel_thigh_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --clip Walk \
+            --output build/character_voxel_thigh_frames \
+            --frames 210 \
+            --cut-frame 75 \
+            --fps 30 \
+            --voxel-size 0.045 \
+            --require-damage \
+            --require-detachment \
+            --require-ground-contact \
+            --require-walk-invalidation \
+            --require-anatomical-isolation | tee build/character_voxel_thigh.log
+
       - name: Encode MP4s
         run: |
           mkdir -p build/media
@@ -222,6 +243,14 @@ jobs:
             -pix_fmt yuv420p \
             -crf 20 \
             build/media/v08_quaternius_voxel_left_hand_detach.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/character_voxel_thigh_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v09_quaternius_voxel_left_thigh_cut.mp4
 
       - name: Encode GIF previews
         run: |
@@ -299,6 +328,9 @@ jobs:
             echo
             echo "[Quaternius voxel left-hand detachment log]"
             cat build/character_voxel.log
+            echo
+            echo "[Quaternius voxel left-thigh severance log]"
+            cat build/character_voxel_thigh.log
           } > build/media/provenance.txt
 
       - name: Upload prototype media
@@ -317,5 +349,6 @@ jobs:
             build/media/v06_real_character_left_arm_severance.mp4
             build/media/v06_real_character_head_severance.mp4
             build/media/v08_quaternius_voxel_left_hand_detach.mp4
+            build/media/v09_quaternius_voxel_left_thigh_cut.mp4
             build/media/provenance.txt
           if-no-files-found: error
