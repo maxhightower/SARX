@@ -816,10 +816,20 @@ int main(int argc, char** argv) {
                         world_offset);
 
                 if (!cut) {
-                    if (args.detached_root != "upperarm_r") {
+                    const bool right_arm =
+                        args.detached_root == "upperarm_r";
+                    const bool left_arm =
+                        args.detached_root == "upperarm_l";
+
+                    if (!right_arm && !left_arm) {
                         throw std::runtime_error(
-                            "articulated evidence path currently requires upperarm_r");
+                            "articulated arm evidence path requires upperarm_r or upperarm_l");
                     }
+
+                    const std::string lowerarm_root =
+                        right_arm ? lowerarm_root : "lowerarm_l";
+                    const std::string hand_root =
+                        right_arm ? hand_root : "hand_l";
 
                     const double previous_seconds =
                         static_cast<double>(frame - 1)
@@ -840,7 +850,7 @@ int main(int argc, char** argv) {
                         character.sample_split_branch(
                             clip,
                             seconds,
-                            "lowerarm_r",
+                            lowerarm_root,
                             true,
                             world_offset);
 
@@ -848,7 +858,7 @@ int main(int argc, char** argv) {
                         character.sample_split_branch(
                             clip,
                             seconds,
-                            "hand_r",
+                            hand_root,
                             true,
                             world_offset);
 
@@ -856,7 +866,7 @@ int main(int argc, char** argv) {
                         character.sample_split_branch(
                             clip,
                             previous_seconds,
-                            "lowerarm_r",
+                            lowerarm_root,
                             true,
                             previous_offset);
 
@@ -864,7 +874,7 @@ int main(int argc, char** argv) {
                         character.sample_split_branch(
                             clip,
                             previous_seconds,
-                            "hand_r",
+                            hand_root,
                             true,
                             previous_offset);
 
