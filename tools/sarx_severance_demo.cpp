@@ -2,6 +2,7 @@
 #include "sarx/debug_render.hpp"
 #include "sarx/volume.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
