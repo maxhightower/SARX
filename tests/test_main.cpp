@@ -1497,6 +1497,72 @@ void test_adaptive_domain_closes_over_detached_free_island() {
           "free-island closure should include all surviving internal structural constraints");
 }
 
+
+void test_plane_cut_cleanly_separates_generated_volume() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 4;
+    spec.ny = 2;
+    spec.nz = 2;
+    spec.spacing = 0.5;
+    spec.include_diagonals = true;
+    spec.include_tetrahedra = true;
+    spec.structural_break_damage = 1.0;
+    spec.volume_break_damage = 1.0;
+
+    auto lattice = sarx::build_voxel_lattice(spec);
+    Body replayed = lattice.body;
+
+    check(lattice.body.islands().size() == 1,
+          "plane-cut fixture should start as one connected volume");
+
+    DamageSystem damage;
+
+    sarx::PlaneCutDamage cut;
+    cut.center = {0.75, 0.25, 0.25};
+    cut.normal = {1.0, 0.0, 0.0};
+    cut.radius = 0.50;
+    cut.energy = 2.0;
+    cut.event_id = 4000;
+
+    const auto report =
+        damage.apply_plane_cut(lattice.body, cut);
+
+    const auto islands = lattice.body.islands();
+    check(islands.size() == 2,
+          "bounded planar cut between lattice columns should produce exactly two coherent islands");
+    check(report.broken_count() > 0,
+          "planar cut should emit terminal fracture events");
+
+    std::size_t left_count = 0;
+    std::size_t right_count = 0;
+    for (const auto& island : islands) {
+        double mean_x = 0.0;
+        for (const auto id : island.particles) {
+            mean_x += lattice.body.particles()[id].position.x;
+        }
+        mean_x /= static_cast<double>(island.particles.size());
+
+        if (mean_x < cut.center.x) {
+            left_count = island.particles.size();
+        } else {
+            right_count = island.particles.size();
+        }
+    }
+
+    check(left_count == 8 && right_count == 8,
+          "clean planar cut should keep every particle assigned to one of the two main halves");
+
+    DamageSystem replica;
+    const auto replay_reports =
+        replica.replay(replayed, damage.history());
+
+    check(replay_reports.size() == 1
+              && replay_reports[0].event_id == 4000,
+          "planar cut should participate in deterministic damage replay");
+    check(replayed.islands().size() == 2,
+          "replayed planar cut should reproduce the same topology split");
+}
+
 } // namespace
 
 int main() {
@@ -1535,6 +1601,7 @@ int main() {
     test_soa_restricted_solver_matches_body();
     test_tetrahedral_cut_honors_capsule_radius();
     test_adaptive_domain_closes_over_detached_free_island();
+    test_plane_cut_cleanly_separates_generated_volume();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
