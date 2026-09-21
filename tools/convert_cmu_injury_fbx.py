@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import bpy
+import json
+import struct
 import sys
 from pathlib import Path
 
@@ -43,6 +45,58 @@ def clean_scene():
     ):
         # actions in use are handled after objects are removed.
         pass
+
+def strip_non_rotation_animation_channels(glb_path: Path):
+    data = glb_path.read_bytes()
+    if len(data) < 20:
+        raise RuntimeError(f"invalid GLB: {glb_path}")
+
+    magic, version, total_length = struct.unpack_from("<III", data, 0)
+    if magic != 0x46546C67 or version != 2 or total_length != len(data):
+        raise RuntimeError(f"unexpected GLB header: {glb_path}")
+
+    json_length, json_type = struct.unpack_from("<II", data, 12)
+    if json_type != 0x4E4F534A:
+        raise RuntimeError(f"first GLB chunk is not JSON: {glb_path}")
+
+    json_start = 20
+    json_end = json_start + json_length
+    document = json.loads(data[json_start:json_end].decode("utf-8").rstrip(" \t\r\n\x00"))
+
+    kept = 0
+    removed = 0
+    for animation in document.get("animations", []):
+        channels = animation.get("channels", [])
+        filtered = []
+        for channel in channels:
+            path = channel.get("target", {}).get("path")
+            if path == "rotation":
+                filtered.append(channel)
+                kept += 1
+            else:
+                removed += 1
+        animation["channels"] = filtered
+
+    encoded = json.dumps(
+        document,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    encoded += b" " * ((4 - len(encoded) % 4) % 4)
+
+    remainder = data[json_end:]
+    new_total = 12 + 8 + len(encoded) + len(remainder)
+
+    rebuilt = bytearray()
+    rebuilt += struct.pack("<III", magic, version, new_total)
+    rebuilt += struct.pack("<II", len(encoded), json_type)
+    rebuilt += encoded
+    rebuilt += remainder
+
+    glb_path.write_bytes(rebuilt)
+    print("SARX_CMU_GLB_ROTATION_CHANNELS", kept)
+    print("SARX_CMU_GLB_REMOVED_NONROTATION_CHANNELS", removed)
+
 
 def main():
     argv = sys.argv[sys.argv.index("--") + 1 :]
@@ -148,6 +202,7 @@ def main():
         export_yup=True,
     )
 
+    strip_non_rotation_animation_channels(destination)
     print("SARX_CMU_EXPORTED", clip_name, destination)
 
 if __name__ == "__main__":
