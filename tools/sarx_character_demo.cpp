@@ -28,6 +28,9 @@ struct Args {
     double fps{30.0};
     bool list_joints{false};
     bool validate_all_clips{false};
+    int min_mapped_joints{0};
+    double max_motion_rms{
+        std::numeric_limits<double>::infinity()};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -65,6 +68,16 @@ Args parse_args(int argc, char** argv) {
         } else if (
             value == "--validate-all-clips") {
             args.validate_all_clips = true;
+        } else if (
+            value == "--min-mapped-joints"
+            && i + 1 < argc) {
+            args.min_mapped_joints =
+                std::stoi(argv[++i]);
+        } else if (
+            value == "--max-motion-rms"
+            && i + 1 < argc) {
+            args.max_motion_rms =
+                std::stod(argv[++i]);
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_demo"
@@ -75,7 +88,9 @@ Args parse_args(int argc, char** argv) {
                 << " [--frames N]"
                 << " [--fps N]"
                 << " [--list-joints]"
-                << " [--validate-all-clips]\n";
+                << " [--validate-all-clips]"
+                << " [--min-mapped-joints N]"
+                << " [--max-motion-rms N]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -83,9 +98,12 @@ Args parse_args(int argc, char** argv) {
         }
     }
 
-    if (args.frames <= 0 || args.fps <= 0.0) {
+    if (args.frames <= 0
+        || args.fps <= 0.0
+        || args.min_mapped_joints < 0
+        || args.max_motion_rms <= 0.0) {
         throw std::invalid_argument(
-            "frames and fps must be positive");
+            "frames/fps/max motion RMS must be positive and min mapped joints non-negative");
     }
 
     return args;
@@ -265,6 +283,38 @@ int main(int argc, char** argv) {
             throw;
         }
 
+        const auto mapped_nodes =
+            character.animation_target_nodes(
+                clip);
+
+        if (args.min_mapped_joints > 0
+            && mapped_nodes.size()
+                < static_cast<std::size_t>(
+                    args.min_mapped_joints)) {
+
+            std::ostringstream message;
+            message
+                << "animation mapped only "
+                << mapped_nodes.size()
+                << " character nodes; required "
+                << args.min_mapped_joints
+                << ". mapped=";
+
+            for (std::size_t i = 0;
+                 i < mapped_nodes.size();
+                 ++i) {
+
+                if (i > 0) {
+                    message << ",";
+                }
+
+                message << mapped_nodes[i];
+            }
+
+            throw std::runtime_error(
+                message.str());
+        }
+
         const auto restish =
             character.sample(
                 clip,
@@ -324,6 +374,12 @@ int main(int argc, char** argv) {
                 depth,
                 0.5
             });
+
+        if (motion_rms > args.max_motion_rms) {
+            throw std::runtime_error(
+                "animation motion RMS exceeds compatibility bound: "
+                + std::to_string(motion_rms));
+        }
 
         if (motion_rms <= scale * 0.001) {
             throw std::runtime_error(
@@ -407,6 +463,7 @@ int main(int argc, char** argv) {
             << " triangles=" << stats.triangles
             << " joints=" << stats.skin_joints
             << " clips=" << stats.animation_clips
+            << " mapped_nodes=" << mapped_nodes.size()
             << " frames=" << args.frames
             << " output=" << args.output.string()
             << '\n';

@@ -1,0 +1,123 @@
+name: Validate and vendor CMU injury motions
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "research/m2-authored-injury-motion-v1"
+    paths:
+      - "assets/cmu/**"
+      - "tools/fetch_cmu_injury_fbx.py"
+      - "tools/convert_cmu_injury_fbx.py"
+      - ".github/workflows/cmu-injury-motion.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  convert-and-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Install conversion dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y blender python3-numpy
+          python3 -m pip install --user "huggingface_hub>=0.25,<2"
+
+      - name: Download selected authored CMU injury motions
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/cmu-source
+          python3 tools/fetch_cmu_injury_fbx.py build/cmu-source
+
+      - name: Convert FBX motions to animation GLBs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets/cmu build/cmu-logs
+
+          for entry in             "91_16 CMU_Limp"             "91_24 CMU_HurtLegWalk"             "91_25 CMU_DragBadLegWalk"             "139_19 CMU_WalkWoundedLeg"             "142_12 CMU_PainfulLeftKnee"
+          do
+            set -- ${entry}
+            source_id="$1"
+            semantic="$2"
+
+            blender --background --factory-startup \
+              --python-exit-code 1 \
+              --python tools/convert_cmu_injury_fbx.py \
+              -- \
+              "build/cmu-source/${source_id}.fbx" \
+              "assets/quaternius/character.glb" \
+              "assets/cmu/${semantic}.glb" \
+              2>&1 | tee "build/cmu-logs/${semantic}-blender.log"
+          done
+
+          sha256sum assets/cmu/*.glb assets/cmu/*.root.csv | tee assets/cmu/generated-sha256.txt
+
+      - name: Configure SARX
+        run: cmake -S . -B build/cmu-sarx -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build real-character validator
+        run: cmake --build build/cmu-sarx --config Release --target sarx_character_demo
+
+      - name: Validate Quaternius skeleton mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for semantic in CMU_Limp CMU_HurtLegWalk CMU_DragBadLegWalk CMU_WalkWoundedLeg CMU_PainfulLeftKnee
+          do
+            mkdir -p "build/cmu-validation/${semantic}"
+
+            ./build/cmu-sarx/sarx_character_demo               --character assets/quaternius/character.glb               --animations "assets/cmu/${semantic}.glb"               --clip "${semantic}"               --output "build/cmu-validation/${semantic}"               --frames 3               --fps 30               --validate-all-clips               --min-mapped-joints 17               --max-motion-rms 3.0               2>&1 | tee "build/cmu-logs/${semantic}-sarx.log"
+          done
+
+      - name: Commit validated injury animations
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sarx-cmu-generated
+          cp assets/cmu/*.glb /tmp/sarx-cmu-generated/
+          cp assets/cmu/*.root.csv /tmp/sarx-cmu-generated/
+          cp assets/cmu/generated-sha256.txt /tmp/sarx-cmu-generated/
+
+          git fetch origin "${GITHUB_REF_NAME}"
+          git reset --hard "origin/${GITHUB_REF_NAME}"
+
+          cp /tmp/sarx-cmu-generated/*.glb assets/cmu/
+          cp /tmp/sarx-cmu-generated/*.root.csv assets/cmu/
+          cp /tmp/sarx-cmu-generated/generated-sha256.txt assets/cmu/
+
+          git add assets/cmu/*.glb assets/cmu/*.root.csv assets/cmu/generated-sha256.txt
+
+          if git diff --cached --quiet; then
+            echo "CMU injury animations already vendored and unchanged."
+            exit 0
+          fi
+
+          git config user.name "sarx-research-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Vendor validated authored CMU injury motions"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Upload compatibility evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarx-cmu-injury-motion-compatibility
+          path: |
+            assets/cmu/*.glb
+            assets/cmu/*.root.csv
+            assets/cmu/generated-sha256.txt
+            build/cmu-logs/
+            build/cmu-validation/
+          if-no-files-found: error

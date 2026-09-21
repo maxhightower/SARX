@@ -63,6 +63,44 @@ describe_motion_capability(
 
     if (contains_any(
             name,
+            {"limp", "hurtleg", "dragbadleg", "wounded", "painful"})) {
+
+        capability.semantic_intent =
+            "move";
+        capability.locomotion_type =
+            MotionLocomotionType::InjuryLocomotion;
+
+        capability.required_regions = {
+            {"pelvis", 0.55},
+            {"spine_01", 0.45}
+        };
+
+        capability.alternative_chains = {
+            {
+                "usable_weight_bearing_leg",
+                {
+                    {
+                        {"thigh_l", 0.65},
+                        {"calf_l", 0.60},
+                        {"foot_l", 0.50}
+                    },
+                    {
+                        {"thigh_r", 0.65},
+                        {"calf_r", 0.60},
+                        {"foot_r", 0.50}
+                    }
+                },
+                1
+            }
+        };
+
+        capability.minimum_support_contacts = 1;
+        capability.allows_airborne = false;
+        return capability;
+    }
+
+    if (contains_any(
+            name,
             {"walk", "jog", "run", "sprint"})) {
 
         capability.semantic_intent =

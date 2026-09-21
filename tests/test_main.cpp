@@ -1984,6 +1984,76 @@ void test_grounded_recovery_getup_requires_intact_biped() {
         "intact anatomy plus authored get-up should prefer standing recovery");
 }
 
+void test_authored_injury_motion_replaces_walk_after_foot_loss() {
+    std::vector<sarx::AnatomicalAvailability> anatomy = {
+        {"pelvis", 100, 100},
+        {"spine_01", 100, 100},
+        {"thigh_l", 100, 100},
+        {"calf_l", 100, 100},
+        {"foot_l", 100, 0},
+        {"thigh_r", 100, 100},
+        {"calf_r", 100, 100},
+        {"foot_r", 100, 100},
+        {"upperarm_l", 100, 100},
+        {"lowerarm_l", 100, 100},
+        {"upperarm_r", 100, 100},
+        {"lowerarm_r", 100, 100}
+    };
+
+    sarx::MotionPhysicalState physical;
+    physical.grounded = true;
+    physical.airborne = false;
+    physical.support_contacts = 1;
+    physical.root_velocity = {0.0, 0.0, -1.0};
+
+    const auto plan =
+        sarx::plan_authored_injury_locomotion(
+            sarx::BehavioralIntent::MoveForward,
+            "Walk_Formal_Loop",
+            {
+                "CMU_WalkWoundedLeg",
+                "CMU_Limp",
+                "CMU_PainfulLeftKnee"
+            },
+            anatomy,
+            physical);
+
+    check(
+        plan.transition_required
+            && plan.strategy
+                == sarx::MotionStrategy::Limp
+            && !plan.procedural,
+        "isolated foot loss should select authored injury locomotion");
+
+    check(
+        plan.motion_id == "CMU_Limp",
+        "CMU Limp should be the certified authored successor for complete foot loss");
+
+    const auto injury_viability =
+        sarx::evaluate_motion_viability(
+            "CMU_WalkWoundedLeg",
+            anatomy);
+
+    check(
+        injury_viability.state
+            != sarx::MotionViability::Invalid,
+        "authored wounded-leg gait should remain viable with one intact support leg");
+
+    const auto no_assets =
+        sarx::plan_authored_injury_locomotion(
+            sarx::BehavioralIntent::MoveForward,
+            "Walk_Formal_Loop",
+            {},
+            anatomy,
+            physical);
+
+    check(
+        no_assets.transition_required
+            && no_assets.strategy
+                == sarx::MotionStrategy::Stop,
+        "planner must not invent an injury animation when no authored motion is available");
+}
+
 void test_humanoid_shoulder_cut_detaches_arm_cleanly() {
     auto fixture = sarx::build_humanoid_fixture();
     DamageSystem damage;
@@ -2077,6 +2147,7 @@ int main() {
     test_motion_recovery_selects_fall_without_rewriting_intent();
     test_grounded_recovery_selects_kneel_and_defers_locomotion();
     test_grounded_recovery_getup_requires_intact_biped();
+    test_authored_injury_motion_replaces_walk_after_foot_loss();
     test_humanoid_shoulder_cut_detaches_arm_cleanly();
 
     if (failures != 0) {

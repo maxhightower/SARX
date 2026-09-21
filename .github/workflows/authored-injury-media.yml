@@ -1,0 +1,100 @@
+name: Render authored injury locomotion evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "research/m2-authored-injury-motion-v1"
+    paths:
+      - "assets/cmu/**"
+      - "tools/sarx_character_voxel_foot_injury_demo.cpp"
+      - "src/gltf_character.cpp"
+      - "include/sarx/gltf_character.hpp"
+      - "src/motion_viability.cpp"
+      - "include/sarx/motion_viability.hpp"
+      - "src/motion_recovery.cpp"
+      - "include/sarx/motion_recovery.hpp"
+      - ".github/workflows/authored-injury-media.yml"
+
+jobs:
+  render-authored-injury:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Configure
+        run: cmake -S . -B build -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build authored injury demo
+        run: cmake --build build --config Release --target sarx_character_voxel_foot_injury_demo
+
+      - name: Render authored injury variants
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_case() {
+            semantic="$1"
+            out="$2"
+            log="$3"
+            status_file="$4"
+
+            set +e
+            ./build/sarx_character_voxel_foot_injury_demo               --character assets/quaternius/character.glb               --animations assets/quaternius/animations.glb               --clip Walk               --injury-animations "assets/cmu/${semantic}.glb"               --injury-clip "${semantic}"               --injury-root-motion "assets/cmu/${semantic}.root.csv"               --output "${out}"               --frames 240               --cut-frame 75               --fps 30               --voxel-size 0.045               --require-damage               --require-detachment               --require-walk-invalidation               --require-limp               --require-isolated-foot               --require-ground-contact               --require-stable-camera               2>&1 | tee "${log}"
+            status="${PIPESTATUS[0]}"
+            set -e
+
+            echo "${status}" > "${status_file}"
+          }
+
+          run_case CMU_Limp build/cmu_limp_frames build/cmu_limp.log build/cmu_limp.status
+
+          if [[ "$(cat build/cmu_limp.status)" != "0" ]]
+          then
+            echo "Certified CMU Limp failed the complete-foot-loss gates."
+            exit 1
+          fi
+
+      - name: Encode authored injury MP4s
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/media
+
+          encode() {
+            frames="$1"
+            output="$2"
+            ffmpeg -y               -framerate 30               -i "${frames}/frame_%04d.ppm"               -c:v libx264               -pix_fmt yuv420p               -crf 20               "${output}"
+          }
+
+          encode build/cmu_limp_frames build/media/v16_cmu_limp_complete_foot_loss.mp4
+
+      - name: Record authored injury provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "source=CMU Graphics Lab Motion Capture Database"
+            echo "conversion_dataset=gbionics/cmu-fbx"
+            echo
+            echo "[CMU_Limp]"
+            cat build/cmu_limp.log
+            echo "status=$(cat build/cmu_limp.status)"
+          } > build/media/authored-injury-provenance.txt
+
+      - name: Upload authored injury evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarx-authored-injury-motion-media
+          path: |
+            build/media/v16_cmu_limp_complete_foot_loss.mp4
+            build/media/authored-injury-provenance.txt
+          if-no-files-found: error
