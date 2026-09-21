@@ -53,6 +53,8 @@ struct TetrahedralConstraint {
     ParticleId d{};
     double rest_volume{};
     double compliance{0.0};
+    double damage{0.0};
+    double break_damage{1.0};
     double lambda{0.0};
     bool active{true};
     MaterialId material{kDefaultMaterial};
@@ -107,6 +109,7 @@ public:
         ParticleId c,
         ParticleId d,
         double compliance = 0.0,
+        double break_damage = 1.0,
         MaterialId material = kDefaultMaterial);
 
     ConstraintId add_attachment(
@@ -120,6 +123,7 @@ public:
     void set_bone_target(BoneId bone, const Vec3& animated_position);
 
     void damage_structural(ConstraintId constraint, double amount);
+    void damage_tetrahedral(ConstraintId constraint, double amount);
     void damage_attachment(ConstraintId constraint, double amount);
     void damage_bone_joint(BoneId bone, double amount);
 
