@@ -13,7 +13,7 @@ SARX separates four representations:
 3. **Dynamic islands** — topology failure creates connected components that can lose rig authority and become free physics.
 4. **Render representation** — visual detail will remain decoupled from physical resolution.
 
-## Current reference milestone: V0.4A
+## Current reference milestone: V0.4B
 
 The renderer-independent CPU reference now covers:
 
@@ -34,9 +34,17 @@ The renderer-independent CPU reference now covers:
 - deterministic lattice indexing and structural connectivity,
 - spatial material regions,
 - optional diagonal/shear connectivity,
-- automatic root/child bone embedding and particle attachment generation.
+- automatic root/child bone embedding and particle attachment generation,
+- transported rest-space material/fiber orientation,
+- radius-bearing bone/joint capsules,
+- XPBD tetrahedral volume preservation,
+- damageable/cuttable tetrahedral topology,
+- box/sphere/capsule anatomical material regions,
+- region-specific fiber orientation,
+- adaptive wound-local damage-domain selection,
+- GPU-friendly structure-of-arrays state snapshots.
 
-The next stage adds deforming local material frames, joint capsules, and explicit volume-preserving constraints before the GPU migration.
+The next stage moves these validated reference semantics into restricted-domain scheduling, GPU compute/parity work, and a visual rigged-character fixture.
 
 ## Status
 
