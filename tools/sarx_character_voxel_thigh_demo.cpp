@@ -2,6 +2,7 @@
 #include "sarx/detached_articulation.hpp"
 #include "sarx/gltf_character.hpp"
 #include "sarx/motion_viability.hpp"
+#include "sarx/motion_recovery.hpp"
 #include "sarx/voxel_character.hpp"
 
 #include <algorithm>
@@ -36,6 +37,7 @@ struct Args {
     bool require_anatomical_isolation{false};
     bool require_stable_camera{false};
     bool require_articulated_leg{false};
+    bool require_fall_transition{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -74,6 +76,8 @@ Args parse_args(int argc, char** argv) {
             args.require_stable_camera = true;
         } else if (value == "--require-articulated-leg") {
             args.require_articulated_leg = true;
+        } else if (value == "--require-fall-transition") {
+            args.require_fall_transition = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_voxel_thigh_demo"
@@ -91,7 +95,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--require-walk-invalidation]"
                 << " [--require-anatomical-isolation]"
                 << " [--require-stable-camera]"
-                << " [--require-articulated-leg]\n";
+                << " [--require-articulated-leg]"
+                << " [--require-fall-transition]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -460,6 +465,21 @@ int main(int argc, char** argv) {
         double motion_time_seconds = 0.0;
         int motion_frame = 0;
 
+        sarx::MotionRecoveryPlan recovery_plan;
+        std::optional<std::size_t> recovery_clip;
+        std::vector<sarx::Vec3> recovery_source_centers;
+        sarx::Vec3 recovery_start_world_offset{};
+        sarx::Vec3 recovery_world_offset{};
+        sarx::Vec3 recovery_root_velocity{};
+        sarx::Vec3 inherited_root_velocity{};
+        double recovery_time_seconds = 0.0;
+        double recovery_clip_duration = 0.0;
+        double root_velocity_discontinuity = 0.0;
+        double fall_centroid_drop = 0.0;
+        double max_fall_pose_rms = 0.0;
+        int recovery_selected_frame = -1;
+        int recovery_completed_frame = -1;
+
         std::optional<DetachedLeg>
             detached_leg;
 
@@ -493,7 +513,7 @@ int main(int argc, char** argv) {
                     true,
                     world_offset);
 
-            const auto voxel_centers =
+            auto voxel_centers =
                 voxel_character.sample_centers(
                     character,
                     clip,
@@ -765,6 +785,223 @@ int main(int argc, char** argv) {
 
                 normal_walk_authority = false;
                 walk_invalidated_frame = frame;
+
+                const int previous_frame =
+                    std::max(
+                        0,
+                        frame - 1);
+
+                inherited_root_velocity =
+                    (world_offset
+                     - world_offset_for(
+                         previous_frame))
+                    / dt;
+
+                sarx::MotionPhysicalState
+                    physical_state;
+
+                physical_state.root_velocity =
+                    inherited_root_velocity;
+                physical_state.grounded = true;
+                physical_state.airborne = false;
+                physical_state.support_contacts = 1;
+
+                recovery_plan =
+                    sarx::plan_motion_recovery(
+                        sarx::BehavioralIntent::MoveForward,
+                        character.animation_names()[clip],
+                        character.animation_names(),
+                        voxel_character.anatomy_availability(),
+                        physical_state);
+
+                if (recovery_plan.transition_required
+                    && recovery_plan.strategy
+                        == sarx::MotionStrategy::Fall
+                    && !recovery_plan.procedural) {
+
+                    recovery_clip =
+                        character.find_animation(
+                            recovery_plan.motion_id);
+
+                    recovery_clip_duration =
+                        character.animation_duration(
+                            *recovery_clip);
+
+                    recovery_source_centers =
+                        voxel_centers;
+
+                    recovery_start_world_offset =
+                        world_offset;
+
+                    recovery_world_offset =
+                        world_offset;
+
+                    recovery_root_velocity =
+                        inherited_root_velocity;
+
+                    recovery_selected_frame =
+                        frame;
+                }
+            }
+
+            sarx::Vec3 body_world_offset =
+                world_offset;
+
+            if (recovery_clip
+                && frame > recovery_selected_frame) {
+
+                const sarx::Vec3 previous_offset =
+                    recovery_world_offset;
+
+                // Preserve the exact pre-failure root velocity on the
+                // first recovery step. Damping begins only after that
+                // step so the transition cannot teleport or shed
+                // momentum at the authority handoff.
+                recovery_world_offset +=
+                    recovery_root_velocity * dt;
+
+                if (frame
+                    == recovery_selected_frame + 1) {
+
+                    const sarx::Vec3 realized_velocity =
+                        (recovery_world_offset
+                         - previous_offset)
+                        / dt;
+
+                    root_velocity_discontinuity =
+                        sarx::length(
+                            realized_velocity
+                            - inherited_root_velocity);
+                }
+
+                const double horizontal_damping =
+                    std::exp(
+                        -1.10 * dt);
+
+                recovery_root_velocity.x *=
+                    horizontal_damping;
+
+                recovery_root_velocity.z *=
+                    horizontal_damping;
+
+                recovery_time_seconds =
+                    std::min(
+                        recovery_clip_duration,
+                        recovery_time_seconds + dt);
+
+                auto recovery_centers =
+                    voxel_character.sample_centers(
+                        character,
+                        *recovery_clip,
+                        recovery_time_seconds,
+                        false,
+                        recovery_world_offset);
+
+                const double raw_blend =
+                    std::clamp(
+                        recovery_time_seconds / 0.24,
+                        0.0,
+                        1.0);
+
+                const double blend =
+                    raw_blend
+                    * raw_blend
+                    * (3.0 - 2.0 * raw_blend);
+
+                double pose_error_squared = 0.0;
+                std::size_t pose_count = 0;
+
+                sarx::Vec3 source_centroid{};
+                sarx::Vec3 current_centroid{};
+                std::size_t centroid_count = 0;
+
+                const sarx::Vec3 world_delta =
+                    recovery_world_offset
+                    - recovery_start_world_offset;
+
+                for (std::size_t i = 0;
+                     i < voxel_centers.size();
+                     ++i) {
+
+                    const sarx::Vec3 carried_source =
+                        recovery_source_centers[i]
+                        + world_delta;
+
+                    voxel_centers[i] =
+                        carried_source
+                        * (1.0 - blend)
+                        + recovery_centers[i]
+                        * blend;
+
+                    if (voxel_character
+                            .voxels()[i]
+                            .state
+                        != sarx::CharacterVoxelState::Attached) {
+                        continue;
+                    }
+
+                    const sarx::Vec3 local_source =
+                        recovery_source_centers[i]
+                        - recovery_start_world_offset;
+
+                    const sarx::Vec3 local_current =
+                        voxel_centers[i]
+                        - recovery_world_offset;
+
+                    const sarx::Vec3 delta =
+                        local_current
+                        - local_source;
+
+                    pose_error_squared +=
+                        sarx::length_squared(
+                            delta);
+
+                    ++pose_count;
+                    source_centroid +=
+                        local_source;
+                    current_centroid +=
+                        local_current;
+                    ++centroid_count;
+                }
+
+                if (pose_count > 0) {
+                    max_fall_pose_rms =
+                        std::max(
+                            max_fall_pose_rms,
+                            std::sqrt(
+                                pose_error_squared
+                                / static_cast<double>(
+                                    pose_count)));
+                }
+
+                if (centroid_count > 0) {
+                    source_centroid =
+                        source_centroid
+                        / static_cast<double>(
+                            centroid_count);
+
+                    current_centroid =
+                        current_centroid
+                        / static_cast<double>(
+                            centroid_count);
+
+                    fall_centroid_drop =
+                        std::max(
+                            fall_centroid_drop,
+                            source_centroid.y
+                            - current_centroid.y);
+                }
+
+                body_world_offset =
+                    recovery_world_offset;
+
+                if (recovery_time_seconds
+                        >= recovery_clip_duration
+                    && recovery_completed_frame < 0) {
+
+                    recovery_completed_frame =
+                        frame;
+                }
             }
 
             if (detached_leg
@@ -805,7 +1042,7 @@ int main(int argc, char** argv) {
 
             camera.target =
                 character_center
-                + world_offset
+                + body_world_offset
                 + sarx::Vec3{
                     0.0,
                     -scale * 0.12,
@@ -832,7 +1069,7 @@ int main(int argc, char** argv) {
                     - previous_camera_target;
 
                 const sarx::Vec3 world_delta =
-                    world_offset
+                    body_world_offset
                     - previous_camera_world_offset;
 
                 max_camera_tracking_error =
@@ -847,7 +1084,7 @@ int main(int argc, char** argv) {
                 camera.target;
 
             previous_camera_world_offset =
-                world_offset;
+                body_world_offset;
 
             have_previous_camera = true;
 
@@ -941,6 +1178,31 @@ int main(int argc, char** argv) {
                 "detached voxel leg remained rigid after severance");
         }
 
+        if (args.require_fall_transition
+            && (recovery_selected_frame < 0
+                || recovery_plan.strategy
+                    != sarx::MotionStrategy::Fall
+                || recovery_plan.procedural
+                || recovery_plan.motion_id.empty())) {
+            throw std::runtime_error(
+                "invalid Walk did not select an authored fall recovery");
+        }
+
+        if (args.require_fall_transition
+            && root_velocity_discontinuity > 1e-9) {
+            throw std::runtime_error(
+                "fall transition failed to inherit root momentum: "
+                + std::to_string(
+                    root_velocity_discontinuity));
+        }
+
+        if (args.require_fall_transition
+            && max_fall_pose_rms
+                < args.voxel_size * 1.5) {
+            throw std::runtime_error(
+                "fall transition did not visibly leave the frozen Walk pose");
+        }
+
         std::cout
             << "SARX Quaternius voxel thigh cut demo complete:"
             << " total_voxels="
@@ -957,6 +1219,25 @@ int main(int argc, char** argv) {
             << detached_frame
             << " walk_invalidated_frame="
             << walk_invalidated_frame
+            << " recovery_selected_frame="
+            << recovery_selected_frame
+            << " recovery_completed_frame="
+            << recovery_completed_frame
+            << " recovery_strategy="
+            << sarx::motion_strategy_name(
+                recovery_plan.strategy)
+            << " recovery_motion="
+            << (recovery_plan.motion_id.empty()
+                ? std::string{"none"}
+                : recovery_plan.motion_id)
+            << " recovery_procedural="
+            << (recovery_plan.procedural ? 1 : 0)
+            << " root_velocity_discontinuity="
+            << root_velocity_discontinuity
+            << " fall_centroid_drop="
+            << fall_centroid_drop
+            << " fall_pose_rms="
+            << max_fall_pose_rms
             << " left_thigh_attached_fraction="
             << voxel_character.attached_fraction(
                 "thigh_l")
