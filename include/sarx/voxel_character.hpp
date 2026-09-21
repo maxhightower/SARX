@@ -59,6 +59,14 @@ public:
         double radius,
         double damage = 1.0);
 
+    std::size_t damage_cut_disk(
+        const CharacterMeshFrame& animated_mesh,
+        const Vec3& center,
+        const Vec3& normal,
+        double half_thickness,
+        double radius,
+        double damage = 1.0);
+
     [[nodiscard]] std::optional<DetachedVoxelComponent>
     detach_component_near(
         const CharacterMeshFrame& animated_mesh,
