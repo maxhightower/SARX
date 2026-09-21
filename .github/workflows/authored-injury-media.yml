@@ -120,10 +120,9 @@ jobs:
         with:
           name: sarx-authored-injury-motion-media
           path: |
-            build/media/v14a_cmu_limp.mp4
-            build/media/v14b_cmu_hurt_leg_walk.mp4
-            build/media/v14c_cmu_walk_wounded_leg.mp4
-            build/media/v14d_cmu_painful_left_knee.mp4
-            build/media/v14_cmu_injury_comparison.mp4
+            build/media/v15a_cmu_limp.mp4
+            build/media/v15b_cmu_walk_wounded_leg.mp4
+            build/media/v15c_cmu_painful_left_knee.mp4
+            build/media/v15_cmu_injury_comparison.mp4
             build/media/authored-injury-provenance.txt
           if-no-files-found: error
