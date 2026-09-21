@@ -674,8 +674,8 @@ int main(int argc, char** argv) {
                         animated,
                         wrist,
                         hand_axis,
-                        args.voxel_size * 0.78,
-                        args.voxel_size * 2.40,
+                        args.voxel_size * 0.82,
+                        args.voxel_size * 4.00,
                         0.55);
 
                 auto component =
@@ -880,7 +880,10 @@ int main(int argc, char** argv) {
         if (args.require_detachment
             && !detached_hand) {
             throw std::runtime_error(
-                "left voxel hand never disconnected from main body");
+                "left voxel hand never disconnected from main body; wrist_cut_voxels="
+                + std::to_string(destroyed_total)
+                + " attached_voxels="
+                + std::to_string(stats.attached_voxels));
         }
 
         if (args.require_ground_contact
