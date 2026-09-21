@@ -55,12 +55,25 @@ ParticleId Body::add_particle(const Vec3& position, double mass) {
     return particles_.size() - 1;
 }
 
-BoneId Body::add_bone(BoneId parent, const Vec3& animated_position) {
+BoneId Body::add_bone(
+    BoneId parent,
+    const Vec3& animated_position,
+    double joint_break_damage,
+    MaterialId joint_material) {
+
     if (parent != kNoParent && parent >= bones_.size()) {
         throw std::out_of_range("bone parent must already exist");
     }
+    if (joint_break_damage <= 0.0) {
+        throw std::invalid_argument("joint break damage must be positive");
+    }
 
-    bones_.push_back(Bone{parent, animated_position, true});
+    Bone bone;
+    bone.parent = parent;
+    bone.animated_position = animated_position;
+    bone.joint_break_damage = joint_break_damage;
+    bone.joint_material = joint_material;
+    bones_.push_back(bone);
     return bones_.size() - 1;
 }
 
@@ -68,7 +81,8 @@ ConstraintId Body::add_structural_constraint(
     ParticleId a,
     ParticleId b,
     double compliance,
-    double break_damage) {
+    double break_damage,
+    MaterialId material) {
 
     if (a >= particles_.size() || b >= particles_.size() || a == b) {
         throw std::out_of_range("invalid structural constraint endpoints");
@@ -77,16 +91,14 @@ ConstraintId Body::add_structural_constraint(
         throw std::invalid_argument("invalid structural constraint parameters");
     }
 
-    structural_.push_back(StructuralConstraint{
-        a,
-        b,
-        length(particles_[b].position - particles_[a].position),
-        compliance,
-        0.0,
-        break_damage,
-        0.0,
-        true
-    });
+    StructuralConstraint c;
+    c.a = a;
+    c.b = b;
+    c.rest_length = length(particles_[b].position - particles_[a].position);
+    c.compliance = compliance;
+    c.break_damage = break_damage;
+    c.material = material;
+    structural_.push_back(c);
     return structural_.size() - 1;
 }
 
@@ -95,7 +107,8 @@ ConstraintId Body::add_attachment(
     BoneId bone,
     const Vec3& local_offset,
     double compliance,
-    double break_damage) {
+    double break_damage,
+    MaterialId material) {
 
     if (particle >= particles_.size() || bone >= bones_.size()) {
         throw std::out_of_range("invalid attachment");
@@ -104,16 +117,14 @@ ConstraintId Body::add_attachment(
         throw std::invalid_argument("invalid attachment parameters");
     }
 
-    attachments_.push_back(AttachmentConstraint{
-        particle,
-        bone,
-        local_offset,
-        compliance,
-        0.0,
-        break_damage,
-        {},
-        true
-    });
+    AttachmentConstraint a;
+    a.particle = particle;
+    a.bone = bone;
+    a.local_offset = local_offset;
+    a.compliance = compliance;
+    a.break_damage = break_damage;
+    a.material = material;
+    attachments_.push_back(a);
     return attachments_.size() - 1;
 }
 
@@ -156,22 +167,41 @@ void Body::damage_attachment(ConstraintId constraint, double amount) {
     }
 }
 
-void Body::break_structural(ConstraintId constraint) {
-    damage_structural(constraint, structural_.at(constraint).break_damage);
-}
-
-void Body::break_attachment(ConstraintId constraint) {
-    damage_attachment(constraint, attachments_.at(constraint).break_damage);
-}
-
-void Body::break_bone_joint(BoneId bone) {
+void Body::damage_bone_joint(BoneId bone, double amount) {
     if (bone >= bones_.size()) {
         throw std::out_of_range("invalid bone");
     }
-    if (bones_[bone].parent == kNoParent) {
+    if (amount < 0.0) {
+        throw std::invalid_argument("damage amount must be non-negative");
+    }
+
+    auto& b = bones_[bone];
+    if (b.parent == kNoParent) {
         return;
     }
-    bones_[bone].joint_to_parent_active = false;
+
+    b.joint_damage += amount;
+    if (b.joint_damage >= b.joint_break_damage) {
+        b.joint_to_parent_active = false;
+    }
+}
+
+void Body::break_structural(ConstraintId constraint) {
+    const auto& c = structural_.at(constraint);
+    damage_structural(constraint, std::max(0.0, c.break_damage - c.damage));
+}
+
+void Body::break_attachment(ConstraintId constraint) {
+    const auto& a = attachments_.at(constraint);
+    damage_attachment(constraint, std::max(0.0, a.break_damage - a.damage));
+}
+
+void Body::break_bone_joint(BoneId bone) {
+    const auto& b = bones_.at(bone);
+    if (b.parent == kNoParent) {
+        return;
+    }
+    damage_bone_joint(bone, std::max(0.0, b.joint_break_damage - b.joint_damage));
 }
 
 bool Body::bone_root_connected(BoneId bone) const {
