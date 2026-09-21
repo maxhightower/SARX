@@ -2,6 +2,8 @@
 #include "sarx/damage.hpp"
 #include "sarx/broad_phase.hpp"
 #include "sarx/volume.hpp"
+#include "sarx/adaptive.hpp"
+#include "sarx/soa.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -958,6 +960,104 @@ void test_box_region_backwards_compatibility() {
           "box region should not leak outside its bounds");
 }
 
+
+void test_adaptive_damage_domain_is_local() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 12;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.25;
+    spec.include_diagonals = false;
+    spec.include_tetrahedra = true;
+
+    const auto lattice = sarx::build_voxel_lattice(spec);
+
+    const auto domain = sarx::select_damage_domain(
+        lattice.body,
+        {0.5, 0.25, 0.25},
+        0.30);
+
+    check(!domain.particles.empty(),
+          "adaptive damage domain should include nearby particles");
+    check(!domain.tetrahedral.empty(),
+          "adaptive damage domain should include nearby volume cells");
+    check(domain.particles.size() < lattice.body.particles().size(),
+          "localized damage domain should not awaken the entire body");
+    check(domain.tetrahedral.size()
+              < lattice.body.tetrahedral_constraints().size(),
+          "localized damage domain should reject distant tetrahedral cells");
+
+    sarx::WoundDescriptor wound;
+    wound.center = {0.5, 0.25, 0.25};
+    wound.radius = 0.10;
+
+    const auto wound_domain =
+        sarx::select_damage_domain(lattice.body, wound, 0.20);
+
+    check(std::abs(wound_domain.radius - 0.30) < 1e-12,
+          "wound domain should expand persistent wound radius by requested halo");
+    check(wound_domain.particles == domain.particles,
+          "equivalent wound+halo and explicit sphere should select identical particles");
+}
+
+void test_body_soa_snapshot_matches_authoritative_state() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 3;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.5;
+    spec.include_diagonals = false;
+    spec.include_tetrahedra = true;
+
+    auto lattice = sarx::build_voxel_lattice(spec);
+
+    const auto root = sarx::embed_bone(
+        lattice,
+        sarx::kNoParent,
+        {0.5, 0.5, 0.5},
+        0.51,
+        1e-8,
+        1.0,
+        2,
+        1.0,
+        3,
+        0.15);
+
+    check(!root.attachments.empty(),
+          "SoA fixture should contain embedded attachments");
+
+    lattice.body.particles()[0].velocity = {1.0, 2.0, 3.0};
+    lattice.body.damage_structural(0, 0.25);
+    lattice.body.damage_tetrahedral(0, 0.40);
+
+    const auto soa = sarx::snapshot_body_soa(lattice.body);
+
+    check(soa.particles.px.size() == lattice.body.particles().size(),
+          "SoA particle count should match authoritative body");
+    check(soa.structural.a.size()
+              == lattice.body.structural_constraints().size(),
+          "SoA structural count should match authoritative body");
+    check(soa.tetrahedral.a.size()
+              == lattice.body.tetrahedral_constraints().size(),
+          "SoA tetrahedral count should match authoritative body");
+    check(soa.bones.parent.size() == lattice.body.bones().size(),
+          "SoA bone count should match authoritative body");
+    check(soa.attachments.particle.size()
+              == lattice.body.attachments().size(),
+          "SoA attachment count should match authoritative body");
+
+    check(std::abs(soa.particles.vx[0] - 1.0) < 1e-12
+              && std::abs(soa.particles.vy[0] - 2.0) < 1e-12
+              && std::abs(soa.particles.vz[0] - 3.0) < 1e-12,
+          "SoA snapshot should preserve particle velocity components");
+    check(std::abs(soa.structural.damage[0] - 0.25) < 1e-12,
+          "SoA snapshot should preserve structural damage");
+    check(std::abs(soa.tetrahedral.damage[0] - 0.40) < 1e-12,
+          "SoA snapshot should preserve tetrahedral damage");
+    check(std::abs(soa.bones.joint_radius[root.bone] - 0.15) < 1e-12,
+          "SoA snapshot should preserve joint capsule radius");
+}
+
 } // namespace
 
 int main() {
@@ -986,12 +1086,14 @@ int main() {
     test_cut_releases_tetrahedral_connectivity();
     test_anatomical_region_shapes_and_priority();
     test_box_region_backwards_compatibility();
+    test_adaptive_damage_domain_is_local();
+    test_body_soa_snapshot_matches_authoritative_state();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
         return EXIT_FAILURE;
     }
 
-    std::cout << "SARX V0.4B mechanics tests passed.\n";
+    std::cout << "SARX V0.4B tests passed.\n";
     return EXIT_SUCCESS;
 }
