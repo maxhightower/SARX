@@ -201,10 +201,10 @@ void write_debug_ppm(
 
     if (options.tetrahedral) {
         const Color active{210, 214, 220};
-        const Color broken{236, 190, 190};
 
         for (const auto& t : body.tetrahedral_constraints()) {
-            const Color color = t.active ? active : broken;
+            if (!t.active) continue;
+            const Color color = active;
 
             const Vec3 p0 = body.particles()[t.a].position;
             const Vec3 p1 = body.particles()[t.b].position;
@@ -222,10 +222,10 @@ void write_debug_ppm(
 
     if (options.structural) {
         for (const auto& constraint : body.structural_constraints()) {
+            if (!constraint.active) continue;
+
             Color color{72, 78, 86};
-            if (!constraint.active) {
-                color = {205, 75, 75};
-            } else if (constraint.damage > 0.0) {
+            if (constraint.damage > 0.0) {
                 color = {196, 126, 45};
             }
 
@@ -235,7 +235,7 @@ void write_debug_ppm(
                 body.particles()[constraint.a].position,
                 body.particles()[constraint.b].position,
                 color,
-                constraint.active ? 1 : 2);
+                1);
         }
     }
 
@@ -254,17 +254,28 @@ void write_debug_ppm(
                 continue;
             }
 
-            const Color color = bone.joint_to_parent_active
-                ? Color{45, 104, 196}
-                : Color{210, 55, 55};
-
-            draw_segment(
-                canvas,
-                projector,
-                body.bones()[bone.parent].animated_position,
-                bone.animated_position,
-                color,
-                3);
+            if (bone.joint_to_parent_active) {
+                draw_segment(
+                    canvas,
+                    projector,
+                    body.bones()[bone.parent].animated_position,
+                    bone.animated_position,
+                    {45, 104, 196},
+                    3);
+            } else {
+                const Vec3 break_point =
+                    midpoint(
+                        body.bones()[bone.parent].animated_position,
+                        bone.animated_position);
+                const auto point = projector.project(break_point);
+                if (point.valid) {
+                    canvas.ring(
+                        static_cast<int>(std::lround(point.x)),
+                        static_cast<int>(std::lround(point.y)),
+                        7,
+                        {210, 55, 55});
+                }
+            }
         }
     }
 
@@ -286,10 +297,11 @@ void write_debug_ppm(
             const auto point = projector.project(wound.center);
             if (!point.valid) continue;
 
-            const int radius = std::max(
-                4,
+            const int radius = std::clamp(
                 static_cast<int>(std::lround(
-                    wound.radius * camera.pixels_per_unit)));
+                    wound.radius * camera.pixels_per_unit * 0.25)),
+                4,
+                10);
 
             canvas.ring(
                 static_cast<int>(std::lround(point.x)),
