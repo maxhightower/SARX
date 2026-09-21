@@ -102,7 +102,8 @@ public:
         ParticleId b,
         double compliance = 0.0,
         double break_damage = 1.0,
-        MaterialId material = kDefaultMaterial);
+        MaterialId material = kDefaultMaterial,
+        const Vec3& material_fiber_rest = {});
 
     ConstraintId add_tetrahedral_constraint(
         ParticleId a,
