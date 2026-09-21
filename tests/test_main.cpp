@@ -1058,6 +1058,205 @@ void test_body_soa_snapshot_matches_authoritative_state() {
           "SoA snapshot should preserve joint capsule radius");
 }
 
+
+void test_restricted_solver_matches_full_on_selected_fixture() {
+    Body full;
+    Body restricted;
+
+    auto build_fixture = [](Body& body) {
+        for (int chain = 0; chain < 8; ++chain) {
+            const double base = static_cast<double>(chain) * 10.0;
+            const auto a = body.add_particle({base + 0.0, 0.0, 0.0});
+            const auto b = body.add_particle({base + 1.0, 0.0, 0.0});
+            const auto c = body.add_particle({base + 2.0, 0.0, 0.0});
+            body.add_structural_constraint(a, b, 0.0);
+            body.add_structural_constraint(b, c, 0.0);
+        }
+    };
+
+    build_fixture(full);
+    restricted = full;
+
+    full.particles()[1].position = {1.0, 0.8, 0.0};
+    restricted.particles()[1].position = {1.0, 0.8, 0.0};
+
+    StepConfig cfg = no_gravity();
+    cfg.substeps = 2;
+    cfg.solver_iterations = 10;
+
+    full.step(1.0 / 60.0, cfg);
+
+    sarx::SolverDomain domain;
+    domain.particles = {0, 1, 2};
+    domain.structural = {0, 1};
+
+    const auto stats =
+        restricted.step_restricted(1.0 / 60.0, domain, cfg);
+
+    for (std::size_t i = 0; i < 3; ++i) {
+        check(sarx::nearly_equal(
+                  restricted.particles()[i].position,
+                  full.particles()[i].position,
+                  1e-10),
+              "restricted solver should match full solver inside an equivalent isolated active fixture");
+        check(sarx::nearly_equal(
+                  restricted.particles()[i].velocity,
+                  full.particles()[i].velocity,
+                  1e-10),
+              "restricted solver should match full solver velocity inside active fixture");
+    }
+
+    for (std::size_t i = 3; i < restricted.particles().size(); ++i) {
+        check(sarx::nearly_equal(
+                  restricted.particles()[i].position,
+                  Body(full).particles()[i].position,
+                  1e-10),
+              "inactive restricted particles should remain unchanged");
+    }
+
+    check(stats.active_particles == 3,
+          "restricted step should report only selected active particles");
+    check(stats.structural_constraints == 2,
+          "restricted step should report only selected structural constraints");
+
+    const std::size_t full_visits =
+        static_cast<std::size_t>(cfg.substeps)
+        * static_cast<std::size_t>(cfg.solver_iterations)
+        * full.structural_constraints().size();
+
+    check(stats.solver_constraint_visits < full_visits / 4,
+          "localized restricted solve should visit far fewer constraints than full-body solve");
+}
+
+void test_restricted_solver_uses_frozen_boundary_anchors() {
+    Body body;
+
+    const auto left = body.add_particle({0.0, 0.0, 0.0});
+    const auto middle = body.add_particle({1.0, 0.0, 0.0});
+    const auto right = body.add_particle({2.0, 0.0, 0.0});
+
+    const auto c0 = body.add_structural_constraint(left, middle, 0.0);
+    const auto c1 = body.add_structural_constraint(middle, right, 0.0);
+
+    body.particles()[middle].position = {1.0, 1.0, 0.0};
+
+    const Vec3 left_before = body.particles()[left].position;
+    const Vec3 right_before = body.particles()[right].position;
+    const Vec3 middle_before = body.particles()[middle].position;
+
+    sarx::SolverDomain domain;
+    domain.particles = {middle};
+    domain.structural = {c0, c1};
+
+    const auto stats =
+        body.step_restricted(1.0 / 60.0, domain, no_gravity());
+
+    check(sarx::nearly_equal(body.particles()[left].position, left_before),
+          "inactive left boundary particle should remain frozen");
+    check(sarx::nearly_equal(body.particles()[right].position, right_before),
+          "inactive right boundary particle should remain frozen");
+    check(body.particles()[middle].position.y < middle_before.y,
+          "active particle should be corrected against frozen boundary constraints");
+    check(stats.active_particles == 1,
+          "boundary fixture should advance only one active particle");
+}
+
+void test_adaptive_domain_tracker_incremental_union() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 16;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.25;
+    spec.include_diagonals = false;
+    spec.include_tetrahedra = true;
+
+    auto lattice = sarx::build_voxel_lattice(spec);
+
+    sarx::AdaptiveDomainTracker tracker;
+    tracker.reset(lattice.body);
+
+    sarx::WoundDescriptor left;
+    left.event_id = 1000;
+    left.center = {0.5, 0.25, 0.25};
+    left.radius = 0.10;
+
+    sarx::WoundDescriptor right;
+    right.event_id = 1001;
+    right.center = {3.0, 0.25, 0.25};
+    right.radius = 0.10;
+
+    tracker.upsert_wound(lattice.body, left, 0.20);
+    const auto left_only = tracker.combined_solver_domain();
+
+    tracker.upsert_wound(lattice.body, right, 0.20);
+    const auto both = tracker.combined_solver_domain();
+
+    check(tracker.active_wound_count() == 2,
+          "tracker should retain two independent wound domains");
+    check(both.particles.size() > left_only.particles.size(),
+          "adding a distant wound should incrementally grow the active particle union");
+    check(both.tetrahedral.size() > left_only.tetrahedral.size(),
+          "adding a distant wound should grow active tetrahedral work");
+
+    check(tracker.remove_wound(left.event_id),
+          "removing an existing wound should report success");
+
+    const auto right_only = tracker.combined_solver_domain();
+    check(tracker.active_wound_count() == 1,
+          "removing one wound should decrement active wound count");
+    check(right_only.particles.size() < both.particles.size(),
+          "removing a wound should shrink the combined active domain");
+
+    check(!tracker.remove_wound(999999),
+          "removing an unknown wound should be a no-op");
+}
+
+void test_adaptive_domain_tracker_upsert_and_refit() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 10;
+    spec.ny = 2;
+    spec.nz = 2;
+    spec.spacing = 0.25;
+    spec.include_diagonals = false;
+    spec.include_tetrahedra = true;
+
+    auto lattice = sarx::build_voxel_lattice(spec);
+
+    sarx::AdaptiveDomainTracker tracker;
+    tracker.reset(lattice.body);
+
+    sarx::WoundDescriptor wound;
+    wound.event_id = 2000;
+    wound.center = {0.25, 0.0, 0.0};
+    wound.radius = 0.10;
+
+    tracker.upsert_wound(lattice.body, wound, 0.20);
+    const auto before = tracker.combined_solver_domain();
+
+    wound.center = {1.75, 0.0, 0.0};
+    tracker.upsert_wound(lattice.body, wound, 0.20);
+    const auto moved = tracker.combined_solver_domain();
+
+    check(tracker.active_wound_count() == 1,
+          "upserting the same event ID should replace rather than duplicate a wound");
+    check(before.particles != moved.particles,
+          "moving an existing wound should replace its active-domain contribution");
+
+    for (auto& particle : lattice.body.particles()) {
+        particle.position += Vec3{100.0, 0.0, 0.0};
+    }
+
+    tracker.refit(lattice.body);
+    const auto refit = tracker.combined_solver_domain();
+
+    check(refit.particles.empty(),
+          "refit should update active particle membership after large deformation");
+    check(refit.structural.empty()
+              && refit.tetrahedral.empty()
+              && refit.attachments.empty(),
+          "refit should remove primitives that no longer overlap stored wound domains");
+}
+
 } // namespace
 
 int main() {
@@ -1088,12 +1287,16 @@ int main() {
     test_box_region_backwards_compatibility();
     test_adaptive_damage_domain_is_local();
     test_body_soa_snapshot_matches_authoritative_state();
+    test_restricted_solver_matches_full_on_selected_fixture();
+    test_restricted_solver_uses_frozen_boundary_anchors();
+    test_adaptive_domain_tracker_incremental_union();
+    test_adaptive_domain_tracker_upsert_and_refit();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
         return EXIT_FAILURE;
     }
 
-    std::cout << "SARX V0.4B tests passed.\n";
+    std::cout << "SARX V0.4C execution tests passed.\n";
     return EXIT_SUCCESS;
 }
