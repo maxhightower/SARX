@@ -666,12 +666,17 @@ int main(int argc, char** argv) {
                 && frame >= args.damage_frame
                 && frame < args.damage_frame + 8) {
 
+                const sarx::Vec3 hand_axis =
+                    animated_hand_center - wrist;
+
                 destroyed_total +=
-                    voxel_character.damage_sphere(
+                    voxel_character.damage_cut_disk(
                         animated,
                         wrist,
-                        args.voxel_size * 1.55,
-                        0.34);
+                        hand_axis,
+                        args.voxel_size * 0.78,
+                        args.voxel_size * 2.40,
+                        0.55);
 
                 auto component =
                     voxel_character
@@ -835,13 +840,13 @@ int main(int argc, char** argv) {
             camera.position =
                 camera.target
                 + sarx::Vec3{
-                    scale * 1.15,
-                    scale * 0.32,
-                    scale * 2.25
+                    scale * 0.52,
+                    scale * 0.14,
+                    scale * 1.05
                 };
 
             camera.vertical_fov_degrees =
-                27.0;
+                30.0;
 
             camera.width = 960;
             camera.height = 720;
