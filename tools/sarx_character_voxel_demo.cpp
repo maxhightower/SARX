@@ -918,6 +918,30 @@ int main(int argc, char** argv) {
             }
         }
 
+        std::size_t unrelated_changed_voxels = 0;
+
+        for (const auto& voxel
+             : voxel_character.voxels()) {
+
+            if (voxel.state
+                    == sarx::CharacterVoxelState::Attached
+                || voxel.anatomical_region == "hand_l"
+                || voxel.anatomical_region == "lowerarm_l") {
+                continue;
+            }
+
+            ++unrelated_changed_voxels;
+        }
+
+        const double left_thigh_fraction =
+            voxel_character.attached_fraction(
+                "thigh_l");
+
+        const auto final_viability =
+            sarx::evaluate_motion_viability(
+                character.animation_names()[clip],
+                voxel_character.anatomy_availability());
+
         const auto stats =
             voxel_character.stats();
 
@@ -942,6 +966,21 @@ int main(int argc, char** argv) {
                     ->ever_grounded)) {
             throw std::runtime_error(
                 "detached voxel hand never hit the ground");
+        }
+
+        if (args.require_anatomical_isolation
+            && unrelated_changed_voxels != 0) {
+            throw std::runtime_error(
+                "left wrist cut altered anatomically unrelated voxels: "
+                + std::to_string(
+                    unrelated_changed_voxels));
+        }
+
+        if (args.require_walk_viability
+            && final_viability.state
+                == sarx::MotionViability::Invalid) {
+            throw std::runtime_error(
+                "normal Walk became invalid during isolated hand severance");
         }
 
         std::cout
@@ -972,6 +1011,12 @@ int main(int argc, char** argv) {
                 ? detached_hand
                     ->max_rotation_radians
                 : 0.0)
+            << " unrelated_changed_voxels="
+            << unrelated_changed_voxels
+            << " left_thigh_attached_fraction="
+            << left_thigh_fraction
+            << " walk_invalidated_frame="
+            << walk_invalidated_frame
             << " voxel_size="
             << stats.voxel_size
             << " frames="
