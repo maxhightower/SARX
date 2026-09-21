@@ -7,6 +7,11 @@ on:
       - "tools/sarx_severance_demo.cpp"
       - "tools/sarx_humanoid_demo.cpp"
       - "tools/sarx_character_demo.cpp"
+      - "tools/sarx_character_severance_demo.cpp"
+      - "src/gltf_character.cpp"
+      - "include/sarx/gltf_character.hpp"
+      - "src/character_render.cpp"
+      - "include/sarx/character_render.hpp"
       - "src/gltf_character.cpp"
       - "include/sarx/gltf_character.hpp"
       - "src/character_render.cpp"
@@ -50,6 +55,7 @@ jobs:
           cmake --build build --config Release --target sarx_severance_demo
           cmake --build build --config Release --target sarx_humanoid_demo
           cmake --build build --config Release --target sarx_character_demo
+          cmake --build build --config Release --target sarx_character_severance_demo
 
       - name: Render bridge frames
         run: |
@@ -75,6 +81,18 @@ jobs:
             --output build/character_frames \
             --frames 180 \
             --fps 30 | tee build/character.log
+
+      - name: Render real skinned severance frames
+        run: |
+          ./build/sarx_character_severance_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --clip Walk \
+            --detach-root upperarm_r \
+            --output build/character_severance_frames \
+            --frames 210 \
+            --cut-frame 90 \
+            --fps 30 | tee build/character_severance.log
 
       - name: Encode MP4s
         run: |
@@ -102,6 +120,14 @@ jobs:
             -pix_fmt yuv420p \
             -crf 20 \
             build/media/v05_real_character_walk.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/character_severance_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v05_real_character_walk_severance.mp4
 
       - name: Encode GIF previews
         run: |
@@ -138,6 +164,17 @@ jobs:
             -lavfi "fps=15,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse" \
             build/media/v05_real_character_walk.gif
 
+          ffmpeg -y \
+            -i build/media/v05_real_character_walk_severance.mp4 \
+            -vf "fps=15,scale=720:-1:flags=lanczos,palettegen" \
+            build/media/palette_character_severance.png
+
+          ffmpeg -y \
+            -i build/media/v05_real_character_walk_severance.mp4 \
+            -i build/media/palette_character_severance.png \
+            -lavfi "fps=15,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse" \
+            build/media/v05_real_character_walk_severance.gif
+
       - name: Record provenance
         run: |
           {
@@ -156,6 +193,9 @@ jobs:
             echo
             echo "[real skinned character walk log]"
             cat build/character.log
+            echo
+            echo "[real skinned character walk severance log]"
+            cat build/character_severance.log
           } > build/media/provenance.txt
 
       - name: Upload prototype media
@@ -169,5 +209,7 @@ jobs:
             build/media/v04d_humanoid_shoulder_severance.gif
             build/media/v05_real_character_walk.mp4
             build/media/v05_real_character_walk.gif
+            build/media/v05_real_character_walk_severance.mp4
+            build/media/v05_real_character_walk_severance.gif
             build/media/provenance.txt
           if-no-files-found: error
