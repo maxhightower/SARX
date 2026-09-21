@@ -35,6 +35,7 @@ struct Args {
     bool require_walk_invalidation{false};
     bool require_anatomical_isolation{false};
     bool require_stable_camera{false};
+    bool require_articulated_leg{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -71,6 +72,8 @@ Args parse_args(int argc, char** argv) {
             args.require_anatomical_isolation = true;
         } else if (value == "--require-stable-camera") {
             args.require_stable_camera = true;
+        } else if (value == "--require-articulated-leg") {
+            args.require_articulated_leg = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_voxel_thigh_demo"
@@ -87,7 +90,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--require-ground-contact]"
                 << " [--require-walk-invalidation]"
                 << " [--require-anatomical-isolation]"
-                << " [--require-stable-camera]\n";
+                << " [--require-stable-camera]"
+                << " [--require-articulated-leg]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -513,6 +517,14 @@ int main(int argc, char** argv) {
                     true,
                     world_offset);
 
+            const auto foot_split =
+                character.sample_split_branch(
+                    clip,
+                    motion_time_seconds,
+                    "foot_l",
+                    true,
+                    world_offset);
+
             const sarx::Vec3 hip =
                 nearest_anchor(
                     thigh_split.body,
@@ -522,6 +534,16 @@ int main(int argc, char** argv) {
                 nearest_anchor(
                     calf_split.body,
                     calf_split.detached);
+
+            const sarx::Vec3 ankle =
+                nearest_anchor(
+                    foot_split.body,
+                    foot_split.detached);
+
+            const sarx::Vec3 foot_tip =
+                farthest_used_point(
+                    foot_split.detached,
+                    ankle);
 
             const sarx::Vec3 cut_center =
                 (hip + knee) * 0.5;
@@ -559,29 +581,75 @@ int main(int argc, char** argv) {
                     leg.component =
                         std::move(*component);
 
-                    std::vector<sarx::Vec3>
-                        previous_centers =
-                            voxel_character.sample_centers(
-                                character,
-                                clip,
-                                std::max(
-                                    0.0,
-                                    motion_time_seconds - dt),
-                                true,
-                                world_offset_for(
-                                    std::max(
-                                        0,
-                                        motion_frame - 1)));
+                    const double previous_seconds =
+                        std::max(
+                            0.0,
+                            motion_time_seconds - dt);
+
+                    const int previous_frame =
+                        std::max(
+                            0,
+                            motion_frame - 1);
+
+                    const sarx::Vec3 previous_offset =
+                        world_offset_for(
+                            previous_frame);
+
+                    const auto previous_thigh_split =
+                        character.sample_split_branch(
+                            clip,
+                            previous_seconds,
+                            "thigh_l",
+                            true,
+                            previous_offset);
+
+                    const auto previous_calf_split =
+                        character.sample_split_branch(
+                            clip,
+                            previous_seconds,
+                            "calf_l",
+                            true,
+                            previous_offset);
+
+                    const auto previous_foot_split =
+                        character.sample_split_branch(
+                            clip,
+                            previous_seconds,
+                            "foot_l",
+                            true,
+                            previous_offset);
+
+                    const sarx::Vec3 previous_hip =
+                        nearest_anchor(
+                            previous_thigh_split.body,
+                            previous_thigh_split.detached);
+
+                    const sarx::Vec3 previous_knee =
+                        nearest_anchor(
+                            previous_calf_split.body,
+                            previous_calf_split.detached);
+
+                    const sarx::Vec3 previous_ankle =
+                        nearest_anchor(
+                            previous_foot_split.body,
+                            previous_foot_split.detached);
+
+                    const sarx::Vec3 previous_foot_tip =
+                        farthest_used_point(
+                            previous_foot_split.detached,
+                            previous_ankle);
+
+                    const sarx::Vec3 previous_cut_center =
+                        (previous_hip
+                         + previous_knee)
+                        * 0.5;
 
                     leg.rest_centers.reserve(
                         leg.component
                             .voxel_indices
                             .size());
 
-                    std::vector<sarx::Vec3>
-                        previous_component_centers;
-
-                    previous_component_centers.reserve(
+                    leg.segment_by_voxel.reserve(
                         leg.component
                             .voxel_indices
                             .size());
@@ -596,51 +664,89 @@ int main(int argc, char** argv) {
                                     index,
                                     voxel_centers));
 
-                        previous_component_centers.push_back(
+                        const std::string& region =
                             voxel_character
-                                .voxel_center(
-                                    index,
-                                    previous_centers));
+                                .voxels()[index]
+                                .anatomical_region;
+
+                        if (region == "thigh_l") {
+                            leg.segment_by_voxel.push_back(0);
+                        } else if (region == "calf_l") {
+                            leg.segment_by_voxel.push_back(1);
+                        } else if (region == "foot_l") {
+                            leg.segment_by_voxel.push_back(2);
+                        } else {
+                            throw std::runtime_error(
+                                "detached leg contains non-leg anatomical region: "
+                                + region);
+                        }
                     }
 
-                    const auto [a_index, b_index] =
-                        farthest_pair(
-                            leg.rest_centers);
+                    const double ankle_rest_angle =
+                        sarx::articulated_joint_angle(
+                            knee,
+                            ankle,
+                            foot_tip);
 
-                    leg.rest_a =
-                        leg.rest_centers[a_index];
+                    sarx::DetachedArticulationConfig articulation;
+                    articulation.rest_anchors = {
+                        cut_center,
+                        knee,
+                        ankle,
+                        foot_tip
+                    };
 
-                    leg.rest_b =
-                        leg.rest_centers[b_index];
+                    articulation.previous_anchors = {
+                        previous_cut_center,
+                        previous_knee,
+                        previous_ankle,
+                        previous_foot_tip
+                    };
 
-                    leg.particle_a =
-                        leg.motion.add_particle(
-                            leg.rest_a,
-                            0.55);
+                    articulation.masses = {
+                        0.30,
+                        0.30,
+                        0.22,
+                        0.18
+                    };
 
-                    leg.particle_b =
-                        leg.motion.add_particle(
-                            leg.rest_b,
-                            0.45);
+                    articulation.joints = {
+                        sarx::PassiveJointProfile{
+                            1,
+                            0.35,
+                            3.10,
+                            0.085,
+                            0.70,
+                            0.20
+                        },
+                        sarx::PassiveJointProfile{
+                            2,
+                            std::max(
+                                0.65,
+                                ankle_rest_angle - 0.55),
+                            std::min(
+                                3.10,
+                                ankle_rest_angle + 0.55),
+                            0.10,
+                            0.72,
+                            0.24
+                        }
+                    };
 
-                    leg.motion
-                        .particles()[leg.particle_a]
-                        .velocity =
-                            (leg.rest_a
-                             - previous_component_centers[a_index])
-                            / dt;
+                    articulation.ground_radius =
+                        args.voxel_size * 0.47;
 
-                    leg.motion
-                        .particles()[leg.particle_b]
-                        .velocity =
-                            (leg.rest_b
-                             - previous_component_centers[b_index])
-                            / dt;
+                    articulation.restitution = 0.06;
+                    articulation.tangential_damping = 0.58;
+                    articulation.contact_velocity_scale = 0.20;
+                    articulation.global_velocity_damping = 0.992;
+                    articulation.contact_iterations = 10;
+                    articulation.substeps = 8;
+                    articulation.solver_iterations = 16;
 
-                    leg.motion.add_structural_constraint(
-                        leg.particle_a,
-                        leg.particle_b,
-                        1e-9);
+                    leg.articulation.initialize(
+                        articulation,
+                        dt);
 
                     detached_frame = frame;
                     detached_leg =
@@ -664,10 +770,9 @@ int main(int argc, char** argv) {
             if (detached_leg
                 && frame > detached_frame) {
 
-                step_detached_leg(
-                    *detached_leg,
-                    dt,
-                    args.voxel_size);
+                detached_leg
+                    ->articulation
+                    .step(dt);
             }
 
             sarx::CharacterMeshFrame visible =
@@ -794,7 +899,8 @@ int main(int argc, char** argv) {
         if (args.require_ground_contact
             && (!detached_leg
                 || !detached_leg
-                    ->ever_grounded)) {
+                    ->articulation
+                    .ever_grounded())) {
             throw std::runtime_error(
                 "detached distal leg never hit the floor");
         }
@@ -821,6 +927,18 @@ int main(int argc, char** argv) {
                 "thigh evidence camera inherited non-locomotion motion: "
                 + std::to_string(
                     max_camera_tracking_error));
+        }
+
+        if (args.require_articulated_leg
+            && detached_leg
+            && detached_leg
+                   ->articulation
+                   .max_joint_angle_delta(0) < 0.08
+            && detached_leg
+                   ->articulation
+                   .max_joint_angle_delta(1) < 0.08) {
+            throw std::runtime_error(
+                "detached voxel leg remained rigid after severance");
         }
 
         std::cout
@@ -853,12 +971,33 @@ int main(int argc, char** argv) {
             << " leg_ground_contacts="
             << (detached_leg
                 ? detached_leg
-                    ->ground_contacts
+                    ->articulation
+                    .ground_contacts()
                 : 0)
-            << " leg_max_rotation_rad="
+            << " knee_delta_rad="
             << (detached_leg
                 ? detached_leg
-                    ->max_rotation_radians
+                    ->articulation
+                    .max_joint_angle_delta(0)
+                : 0.0)
+            << " ankle_delta_rad="
+            << (detached_leg
+                ? detached_leg
+                    ->articulation
+                    .max_joint_angle_delta(1)
+                : 0.0)
+            << " leg_max_rotation_rad="
+            << (detached_leg
+                ? std::max({
+                    detached_leg
+                        ->articulation
+                        .segment_rotation_radians(0),
+                    detached_leg
+                        ->articulation
+                        .segment_rotation_radians(1),
+                    detached_leg
+                        ->articulation
+                        .segment_rotation_radians(2)})
                 : 0.0)
             << " max_camera_tracking_error="
             << max_camera_tracking_error
