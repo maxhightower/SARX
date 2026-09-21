@@ -183,7 +183,7 @@ jobs:
             --animations assets/quaternius/animations.glb \
             --clip Walk \
             --output build/character_voxel_thigh_frames \
-            --frames 210 \
+            --frames 270 \
             --cut-frame 75 \
             --fps 30 \
             --voxel-size 0.045 \
@@ -194,7 +194,8 @@ jobs:
             --require-anatomical-isolation \
             --require-stable-camera \
             --require-articulated-leg \
-            --require-fall-transition | tee build/character_voxel_thigh.log
+            --require-fall-transition \
+            --require-grounded-recovery | tee build/character_voxel_thigh.log
 
       - name: Encode MP4s
         run: |
@@ -266,6 +267,10 @@ jobs:
           cp \
             build/media/v09_quaternius_voxel_left_thigh_cut.mp4 \
             build/media/v10_quaternius_walk_failure_to_fall.mp4
+
+          cp \
+            build/media/v09_quaternius_voxel_left_thigh_cut.mp4 \
+            build/media/v11_quaternius_fall_to_grounded_recovery.mp4
 
       - name: Encode GIF previews
         run: |
@@ -366,5 +371,6 @@ jobs:
             build/media/v08_quaternius_voxel_left_hand_detach.mp4
             build/media/v09_quaternius_voxel_left_thigh_cut.mp4
             build/media/v10_quaternius_walk_failure_to_fall.mp4
+            build/media/v11_quaternius_fall_to_grounded_recovery.mp4
             build/media/provenance.txt
           if-no-files-found: error
