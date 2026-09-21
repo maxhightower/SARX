@@ -171,6 +171,42 @@ sarx::Vec3 used_centroid(
     return center / static_cast<double>(count);
 }
 
+double used_min_y(
+    const sarx::CharacterMeshFrame& frame) {
+
+    if (frame.indices.empty()) {
+        throw std::runtime_error(
+            "detached mesh has no triangles");
+    }
+
+    std::vector<std::uint8_t> used(
+        frame.positions.size(),
+        0u);
+
+    for (const std::uint32_t index : frame.indices) {
+        if (index < used.size()) {
+            used[index] = 1u;
+        }
+    }
+
+    double min_y =
+        std::numeric_limits<double>::infinity();
+
+    for (std::size_t i = 0; i < used.size(); ++i) {
+        if (!used[i]) continue;
+        min_y = std::min(
+            min_y,
+            frame.positions[i].y);
+    }
+
+    if (!std::isfinite(min_y)) {
+        throw std::runtime_error(
+            "detached mesh owns no vertices");
+    }
+
+    return min_y;
+}
+
 void translate_mesh(
     sarx::CharacterMeshFrame& frame,
     const sarx::Vec3& delta) {
@@ -333,12 +369,14 @@ int main(int argc, char** argv) {
             center.y,
             center.z
         };
+        // The Quaternius fixture faces +Z. Render it from the side
+        // so translational travel follows the direction it faces.
         camera.position =
             camera.target
             + sarx::Vec3{
-                scale * 2.25,
+                scale * 4.9,
                 scale * 0.45,
-                scale * 4.9
+                0.0
             };
         camera.vertical_fov_degrees = 34.0;
         camera.width = 960;
@@ -354,15 +392,16 @@ int main(int argc, char** argv) {
                     : 0.0;
 
                 return sarx::Vec3{
-                    -travel * 0.5
-                        + travel * progress,
                     0.0,
-                    0.0
+                    0.0,
+                    -travel * 0.5
+                        + travel * progress
                 };
             };
 
         sarx::CharacterMeshFrame detached_snapshot;
         sarx::Vec3 detached_origin{};
+        double detached_local_min_y = 0.0;
 
         sarx::Body detached_motion;
         sarx::ParticleId detached_particle = 0;
@@ -370,6 +409,8 @@ int main(int argc, char** argv) {
 
         std::size_t boundary_triangles = 0;
         std::size_t detached_triangles = 0;
+        std::size_t ground_contacts = 0;
+        bool ever_grounded = false;
 
         sarx::StepConfig detached_step;
         detached_step.substeps = 2;
@@ -423,6 +464,10 @@ int main(int argc, char** argv) {
                         used_centroid(
                             detached_snapshot);
 
+                    detached_local_min_y =
+                        used_min_y(detached_snapshot)
+                        - detached_origin.y;
+
                     const sarx::Vec3 previous_center =
                         used_centroid(
                             previous_split.detached);
@@ -452,6 +497,39 @@ int main(int argc, char** argv) {
                     detached_motion.step(
                         dt,
                         detached_step);
+
+                    // This is intentionally a narrow ground-plane contact
+                    // model for the evidence demo, not a claim of general
+                    // character/world collision support.
+                    auto& particle =
+                        detached_motion
+                            .particles()[detached_particle];
+
+                    const double lowest_y =
+                        particle.position.y
+                        + detached_local_min_y;
+
+                    if (lowest_y < 0.0) {
+                        particle.position.y -= lowest_y;
+
+                        if (particle.velocity.y < 0.0) {
+                            constexpr double restitution = 0.18;
+                            particle.velocity.y =
+                                -particle.velocity.y
+                                * restitution;
+                        }
+
+                        constexpr double tangential_damping = 0.72;
+                        particle.velocity.x *= tangential_damping;
+                        particle.velocity.z *= tangential_damping;
+
+                        if (std::abs(particle.velocity.y) < 0.06) {
+                            particle.velocity.y = 0.0;
+                        }
+
+                        ++ground_contacts;
+                        ever_grounded = true;
+                    }
                 }
 
                 sarx::CharacterMeshFrame detached =
@@ -482,6 +560,11 @@ int main(int argc, char** argv) {
                 true);
         }
 
+        if (!ever_grounded) {
+            throw std::runtime_error(
+                "detached Quaternius limb never reached the floor");
+        }
+
         std::cout
             << "SARX real character severance demo complete:"
             << " clip="
@@ -492,6 +575,8 @@ int main(int argc, char** argv) {
             << boundary_triangles
             << " detached_triangles="
             << detached_triangles
+            << " ground_contacts="
+            << ground_contacts
             << " frames="
             << args.frames
             << " output="
