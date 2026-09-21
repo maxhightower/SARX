@@ -171,6 +171,39 @@ int main(int argc, char** argv) {
                 0.0,
                 true);
 
+        const double clip_duration =
+            character.animation_duration(clip);
+
+        const auto motion_sample =
+            character.sample(
+                clip,
+                clip_duration * 0.25,
+                true);
+
+        if (motion_sample.positions.size()
+            != restish.positions.size()) {
+            throw std::runtime_error(
+                "walk motion sample changed vertex count");
+        }
+
+        double motion_squared = 0.0;
+        for (std::size_t i = 0;
+             i < restish.positions.size();
+             ++i) {
+            motion_squared +=
+                sarx::length_squared(
+                    motion_sample.positions[i]
+                    - restish.positions[i]);
+        }
+
+        const double motion_rms =
+            std::sqrt(
+                motion_squared
+                / static_cast<double>(
+                    std::max<std::size_t>(
+                        1,
+                        restish.positions.size())));
+
         const Bounds bounds =
             bounds_of(restish);
 
@@ -191,6 +224,11 @@ int main(int argc, char** argv) {
                 depth,
                 0.5
             });
+
+        if (motion_rms <= scale * 0.001) {
+            throw std::runtime_error(
+                "selected animation does not visibly deform the skinned mesh");
+        }
 
         const double travel =
             std::max(
@@ -259,7 +297,9 @@ int main(int argc, char** argv) {
             << " clip="
             << character.animation_names()[clip]
             << " duration="
-            << character.animation_duration(clip)
+            << clip_duration
+            << " motion_rms="
+            << motion_rms
             << " vertices=" << stats.vertices
             << " triangles=" << stats.triangles
             << " joints=" << stats.skin_joints
