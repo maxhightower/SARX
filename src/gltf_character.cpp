@@ -81,6 +81,70 @@ Vec3 transform_point(const Mat4& m, const Vec3& p) {
     return {x, y, z};
 }
 
+Mat4 inverse_affine(const Mat4& matrix) {
+    const double a00 = matrix.m[0];
+    const double a01 = matrix.m[4];
+    const double a02 = matrix.m[8];
+    const double a10 = matrix.m[1];
+    const double a11 = matrix.m[5];
+    const double a12 = matrix.m[9];
+    const double a20 = matrix.m[2];
+    const double a21 = matrix.m[6];
+    const double a22 = matrix.m[10];
+
+    const double determinant =
+        a00 * (a11 * a22 - a12 * a21)
+        - a01 * (a10 * a22 - a12 * a20)
+        + a02 * (a10 * a21 - a11 * a20);
+
+    if (std::abs(determinant) <= 1e-12) {
+        throw std::runtime_error(
+            "cannot invert singular affine transform");
+    }
+
+    const double inv_det = 1.0 / determinant;
+
+    Mat4 inverse = identity();
+
+    inverse.m[0] =
+        (a11 * a22 - a12 * a21) * inv_det;
+    inverse.m[4] =
+        (a02 * a21 - a01 * a22) * inv_det;
+    inverse.m[8] =
+        (a01 * a12 - a02 * a11) * inv_det;
+
+    inverse.m[1] =
+        (a12 * a20 - a10 * a22) * inv_det;
+    inverse.m[5] =
+        (a00 * a22 - a02 * a20) * inv_det;
+    inverse.m[9] =
+        (a02 * a10 - a00 * a12) * inv_det;
+
+    inverse.m[2] =
+        (a10 * a21 - a11 * a20) * inv_det;
+    inverse.m[6] =
+        (a01 * a20 - a00 * a21) * inv_det;
+    inverse.m[10] =
+        (a00 * a11 - a01 * a10) * inv_det;
+
+    const Vec3 translation{
+        matrix.m[12],
+        matrix.m[13],
+        matrix.m[14]
+    };
+
+    const Vec3 inverse_translation =
+        transform_point(
+            inverse,
+            -translation);
+
+    inverse.m[12] = inverse_translation.x;
+    inverse.m[13] = inverse_translation.y;
+    inverse.m[14] = inverse_translation.z;
+
+    return inverse;
+}
+
 Quat normalized_quat(Quat q) {
     const double len = std::sqrt(
         q.x * q.x
@@ -430,6 +494,209 @@ struct GltfCharacter::Impl {
 
     std::unordered_map<std::string, int> node_by_name;
 };
+
+namespace {
+
+std::vector<Mat4> sampled_globals(
+    const std::vector<NodePose>& rest_nodes,
+    const Clip& clip,
+    double time_seconds,
+    bool loop) {
+
+    double time = time_seconds;
+
+    if (clip.duration > 1e-12) {
+        if (loop) {
+            time = std::fmod(
+                std::max(0.0, time),
+                clip.duration);
+        } else {
+            time = std::clamp(
+                time,
+                0.0,
+                clip.duration);
+        }
+    }
+
+    std::vector<NodePose> poses =
+        rest_nodes;
+
+    for (const Track& track : clip.tracks) {
+        if (track.node < 0
+            || static_cast<std::size_t>(
+                   track.node)
+                >= poses.size()) {
+            continue;
+        }
+
+        NodePose& pose =
+            poses[track.node];
+
+        pose.matrix_mode = false;
+
+        const auto value =
+            sample_track(
+                track,
+                time);
+
+        switch (track.path) {
+        case TrackPath::Translation:
+            pose.translation = {
+                value[0],
+                value[1],
+                value[2]
+            };
+            break;
+        case TrackPath::Rotation:
+            pose.rotation = {
+                value[0],
+                value[1],
+                value[2],
+                value[3]
+            };
+            break;
+        case TrackPath::Scale:
+            pose.scale = {
+                value[0],
+                value[1],
+                value[2]
+            };
+            break;
+        }
+    }
+
+    std::vector<Mat4> globals(
+        poses.size(),
+        identity());
+
+    std::vector<std::uint8_t> state(
+        poses.size(),
+        0u);
+
+    const auto compute_global =
+        [&](auto&& self,
+            std::size_t index) -> const Mat4& {
+
+        if (state[index] == 2u) {
+            return globals[index];
+        }
+
+        if (state[index] == 1u) {
+            throw std::runtime_error(
+                "cycle in character node hierarchy");
+        }
+
+        state[index] = 1u;
+
+        const NodePose& pose =
+            poses[index];
+
+        const Mat4 local =
+            pose.matrix_mode
+            ? pose.matrix
+            : trs(
+                pose.translation,
+                pose.rotation,
+                pose.scale);
+
+        if (pose.parent >= 0) {
+            globals[index] =
+                multiply(
+                    self(
+                        self,
+                        static_cast<std::size_t>(
+                            pose.parent)),
+                    local);
+        } else {
+            globals[index] =
+                local;
+        }
+
+        state[index] = 2u;
+        return globals[index];
+    };
+
+    for (std::size_t i = 0;
+         i < poses.size();
+         ++i) {
+        (void)compute_global(
+            compute_global,
+            i);
+    }
+
+    return globals;
+}
+
+int resolve_joint_fragment(
+    const std::vector<NodePose>& nodes,
+    const std::string& fragment) {
+
+    const std::string needle =
+        lower_copy(fragment);
+
+    int root = -1;
+
+    for (std::size_t i = 0;
+         i < nodes.size();
+         ++i) {
+
+        const std::string name =
+            lower_copy(nodes[i].name);
+
+        if (name == needle) {
+            return static_cast<int>(i);
+        }
+
+        if (name.find(needle)
+            != std::string::npos) {
+
+            if (root >= 0) {
+                throw std::out_of_range(
+                    "joint fragment is ambiguous: "
+                    + fragment);
+            }
+
+            root =
+                static_cast<int>(i);
+        }
+    }
+
+    if (root < 0) {
+        throw std::out_of_range(
+            "joint not found: "
+            + fragment);
+    }
+
+    return root;
+}
+
+bool node_descends_from(
+    const std::vector<NodePose>& nodes,
+    int node,
+    int root) {
+
+    std::size_t guard = 0;
+
+    while (node >= 0) {
+        if (++guard > nodes.size()) {
+            throw std::runtime_error(
+                "cycle in character node hierarchy");
+        }
+
+        if (node == root) {
+            return true;
+        }
+
+        node =
+            nodes[
+                static_cast<std::size_t>(node)]
+                .parent;
+    }
+
+    return false;
+}
+
+} // namespace
 
 GltfCharacter::GltfCharacter()
     : impl_(std::make_unique<Impl>()) {}
@@ -1401,6 +1668,293 @@ CharacterSplitFrame GltfCharacter::sample_split_branch(
     }
 
     return result;
+}
+
+std::vector<CharacterPointBinding>
+GltfCharacter::bind_points_to_skin(
+    std::size_t animation,
+    double time_seconds,
+    const std::vector<Vec3>& world_points,
+    bool loop) const {
+
+    if (animation >= impl_->clips.size()) {
+        throw std::out_of_range(
+            "animation index out of range");
+    }
+
+    const CharacterMeshFrame sampled =
+        sample(
+            animation,
+            time_seconds,
+            loop);
+
+    const auto globals =
+        sampled_globals(
+            impl_->rest_nodes,
+            impl_->clips[animation],
+            time_seconds,
+            loop);
+
+    std::vector<CharacterPointBinding>
+        bindings;
+
+    bindings.reserve(
+        world_points.size());
+
+    for (const Vec3& point
+         : world_points) {
+
+        double best_distance =
+            std::numeric_limits<double>::infinity();
+
+        const MeshPart* best_part =
+            nullptr;
+
+        const VertexData* best_vertex =
+            nullptr;
+
+        std::size_t global_vertex = 0;
+
+        for (const MeshPart& part
+             : impl_->parts) {
+
+            for (const VertexData& vertex
+                 : part.vertices) {
+
+                if (global_vertex
+                    >= sampled.positions.size()) {
+                    throw std::logic_error(
+                        "sampled vertex count mismatch");
+                }
+
+                if (vertex.skinned) {
+                    const double distance =
+                        length_squared(
+                            sampled.positions[
+                                global_vertex]
+                            - point);
+
+                    if (distance
+                        < best_distance) {
+                        best_distance =
+                            distance;
+                        best_part = &part;
+                        best_vertex = &vertex;
+                    }
+                }
+
+                ++global_vertex;
+            }
+        }
+
+        if (!best_part
+            || !best_vertex
+            || best_part->skin < 0
+            || static_cast<std::size_t>(
+                   best_part->skin)
+                >= impl_->skins.size()) {
+            throw std::runtime_error(
+                "could not bind character point to skinned vertex");
+        }
+
+        const SkinData& skin =
+            impl_->skins[
+                static_cast<std::size_t>(
+                    best_part->skin)];
+
+        CharacterPointBinding binding;
+
+        double total = 0.0;
+        double strongest = -1.0;
+
+        for (int influence = 0;
+             influence < 4;
+             ++influence) {
+
+            const double weight =
+                best_vertex
+                    ->weights[influence];
+
+            if (weight <= 1e-12) {
+                continue;
+            }
+
+            const std::size_t slot =
+                best_vertex
+                    ->joints[influence];
+
+            if (slot >= skin.joints.size()) {
+                continue;
+            }
+
+            const int joint_node =
+                skin.joints[slot];
+
+            if (joint_node < 0
+                || static_cast<std::size_t>(
+                       joint_node)
+                    >= globals.size()) {
+                continue;
+            }
+
+            CharacterPointInfluence out;
+            out.joint_node = joint_node;
+            out.joint_name =
+                impl_->rest_nodes[
+                    static_cast<std::size_t>(
+                        joint_node)]
+                    .name;
+
+            out.weight = weight;
+            out.joint_local_point =
+                transform_point(
+                    inverse_affine(
+                        globals[
+                            static_cast<std::size_t>(
+                                joint_node)]),
+                    point);
+
+            binding.influences[
+                binding.influence_count++] =
+                    out;
+
+            total += weight;
+
+            if (weight > strongest) {
+                strongest = weight;
+                binding.dominant_joint =
+                    out.joint_name;
+            }
+        }
+
+        if (binding.influence_count == 0
+            || total <= 1e-12) {
+            throw std::runtime_error(
+                "character point binding has no valid influences");
+        }
+
+        if (std::abs(total - 1.0)
+            > 1e-8) {
+            for (std::size_t i = 0;
+                 i < binding.influence_count;
+                 ++i) {
+                binding.influences[i]
+                    .weight /= total;
+            }
+        }
+
+        bindings.push_back(
+            std::move(binding));
+    }
+
+    return bindings;
+}
+
+std::vector<Vec3>
+GltfCharacter::sample_bound_points(
+    const std::vector<CharacterPointBinding>& bindings,
+    std::size_t animation,
+    double time_seconds,
+    bool loop,
+    const Vec3& world_offset) const {
+
+    if (animation >= impl_->clips.size()) {
+        throw std::out_of_range(
+            "animation index out of range");
+    }
+
+    const auto globals =
+        sampled_globals(
+            impl_->rest_nodes,
+            impl_->clips[animation],
+            time_seconds,
+            loop);
+
+    std::vector<Vec3> points;
+    points.reserve(
+        bindings.size());
+
+    for (const auto& binding
+         : bindings) {
+
+        Vec3 point{};
+        double total = 0.0;
+
+        for (std::size_t i = 0;
+             i < binding.influence_count;
+             ++i) {
+
+            const auto& influence =
+                binding.influences[i];
+
+            if (influence.joint_node < 0
+                || static_cast<std::size_t>(
+                       influence.joint_node)
+                    >= globals.size()
+                || influence.weight <= 1e-12) {
+                continue;
+            }
+
+            point +=
+                transform_point(
+                    globals[
+                        static_cast<std::size_t>(
+                            influence.joint_node)],
+                    influence.joint_local_point)
+                * influence.weight;
+
+            total += influence.weight;
+        }
+
+        if (total <= 1e-12) {
+            throw std::runtime_error(
+                "bound character point has no valid sampled influence");
+        }
+
+        if (std::abs(total - 1.0)
+            > 1e-8) {
+            point = point / total;
+        }
+
+        points.push_back(
+            point + world_offset);
+    }
+
+    return points;
+}
+
+double GltfCharacter::binding_branch_weight(
+    const CharacterPointBinding& binding,
+    const std::string& root_joint_fragment) const {
+
+    const int root =
+        resolve_joint_fragment(
+            impl_->rest_nodes,
+            root_joint_fragment);
+
+    double total = 0.0;
+
+    for (std::size_t i = 0;
+         i < binding.influence_count;
+         ++i) {
+
+        const auto& influence =
+            binding.influences[i];
+
+        if (influence.joint_node < 0
+            || influence.weight <= 1e-12) {
+            continue;
+        }
+
+        if (node_descends_from(
+                impl_->rest_nodes,
+                influence.joint_node,
+                root)) {
+            total += influence.weight;
+        }
+    }
+
+    return total;
 }
 
 } // namespace sarx
