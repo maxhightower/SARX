@@ -44,6 +44,7 @@ struct StructuralConstraint {
     double lambda{0.0};
     bool active{true};
     MaterialId material{kDefaultMaterial};
+    Vec3 material_fiber_rest{};
 };
 
 struct TetrahedralConstraint {
