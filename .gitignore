@@ -6,3 +6,5 @@ out/
 *.suo
 *.VC.db
 CMakeUserPresets.json
+
+papers/local/
