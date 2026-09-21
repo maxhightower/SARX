@@ -86,6 +86,21 @@ struct StepConfig {
     Vec3 gravity{0.0, -9.81, 0.0};
 };
 
+struct SolverDomain {
+    std::vector<ParticleId> particles;
+    std::vector<ConstraintId> structural;
+    std::vector<ConstraintId> tetrahedral;
+    std::vector<ConstraintId> attachments;
+};
+
+struct StepStats {
+    std::size_t active_particles{};
+    std::size_t structural_constraints{};
+    std::size_t tetrahedral_constraints{};
+    std::size_t attachment_constraints{};
+    std::size_t solver_constraint_visits{};
+};
+
 class Body {
 public:
     ParticleId add_particle(const Vec3& position, double mass = 1.0);
@@ -140,6 +155,11 @@ public:
 
     void step(double dt, const StepConfig& config = {});
 
+    [[nodiscard]] StepStats step_restricted(
+        double dt,
+        const SolverDomain& domain,
+        const StepConfig& config = {});
+
     [[nodiscard]] const std::vector<Particle>& particles() const { return particles_; }
     [[nodiscard]] std::vector<Particle>& particles() { return particles_; }
     [[nodiscard]] const std::vector<Bone>& bones() const { return bones_; }
@@ -148,9 +168,18 @@ public:
     [[nodiscard]] const std::vector<AttachmentConstraint>& attachments() const { return attachments_; }
 
 private:
-    void solve_structural(double h);
-    void solve_tetrahedral(double h);
-    void solve_attachments(double h);
+    void solve_structural(
+        double h,
+        const std::vector<ConstraintId>& ids,
+        const std::vector<std::uint8_t>& active_particles);
+    void solve_tetrahedral(
+        double h,
+        const std::vector<ConstraintId>& ids,
+        const std::vector<std::uint8_t>& active_particles);
+    void solve_attachments(
+        double h,
+        const std::vector<ConstraintId>& ids,
+        const std::vector<std::uint8_t>& active_particles);
 
     std::vector<Particle> particles_;
     std::vector<Bone> bones_;
