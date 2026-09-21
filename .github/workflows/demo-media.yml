@@ -99,7 +99,8 @@ jobs:
             --output build/character_severance_frames \
             --frames 210 \
             --cut-frame 90 \
-            --fps 30 | tee build/character_severance.log
+            --fps 30 \
+            --require-ground-contact | tee build/character_severance.log
 
       - name: Encode MP4s
         run: |
