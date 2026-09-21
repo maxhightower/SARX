@@ -2,6 +2,12 @@ name: Render SARX demo media
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/sarx_severance_demo.cpp"
+      - "src/debug_render.cpp"
+      - "include/sarx/debug_render.hpp"
+      - ".github/workflows/demo-media.yml"
   push:
     branches:
       - "research/**"
