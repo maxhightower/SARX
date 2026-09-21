@@ -151,4 +151,155 @@ AdaptiveDamageDomain select_damage_domain(
         wound.radius + halo);
 }
 
+SolverDomain solver_domain(const AdaptiveDamageDomain& domain) {
+    SolverDomain result;
+    result.particles = domain.particles;
+    result.structural = domain.structural;
+    result.tetrahedral = domain.tetrahedral;
+    result.attachments = domain.attachments;
+    return result;
+}
+
+void AdaptiveDomainTracker::reset(const Body& body) {
+    particle_count_ = body.particles().size();
+    structural_count_ = body.structural_constraints().size();
+    tetrahedral_count_ = body.tetrahedral_constraints().size();
+    attachment_count_ = body.attachments().size();
+
+    particle_refs_.assign(particle_count_, 0);
+    structural_refs_.assign(structural_count_, 0);
+    tetrahedral_refs_.assign(tetrahedral_count_, 0);
+    attachment_refs_.assign(attachment_count_, 0);
+    entries_.clear();
+}
+
+void AdaptiveDomainTracker::validate_shape(const Body& body) const {
+    if (particle_count_ != body.particles().size()
+        || structural_count_ != body.structural_constraints().size()
+        || tetrahedral_count_ != body.tetrahedral_constraints().size()
+        || attachment_count_ != body.attachments().size()) {
+        throw std::logic_error(
+            "adaptive domain tracker body topology changed; reset required");
+    }
+}
+
+void AdaptiveDomainTracker::add_domain_refs(
+    const AdaptiveDamageDomain& domain) {
+
+    for (const auto id : domain.particles) {
+        ++particle_refs_.at(id);
+    }
+    for (const auto id : domain.structural) {
+        ++structural_refs_.at(id);
+    }
+    for (const auto id : domain.tetrahedral) {
+        ++tetrahedral_refs_.at(id);
+    }
+    for (const auto id : domain.attachments) {
+        ++attachment_refs_.at(id);
+    }
+}
+
+void AdaptiveDomainTracker::remove_domain_refs(
+    const AdaptiveDamageDomain& domain) {
+
+    auto decrement = [](auto& refs, const auto& ids) {
+        for (const auto id : ids) {
+            auto& value = refs.at(id);
+            if (value == 0) {
+                throw std::logic_error(
+                    "adaptive domain reference count underflow");
+            }
+            --value;
+        }
+    };
+
+    decrement(particle_refs_, domain.particles);
+    decrement(structural_refs_, domain.structural);
+    decrement(tetrahedral_refs_, domain.tetrahedral);
+    decrement(attachment_refs_, domain.attachments);
+}
+
+void AdaptiveDomainTracker::upsert_wound(
+    const Body& body,
+    const WoundDescriptor& wound,
+    double halo) {
+
+    if (halo < 0.0) {
+        throw std::invalid_argument("adaptive wound halo must be non-negative");
+    }
+
+    if (particle_refs_.empty()
+        && structural_refs_.empty()
+        && tetrahedral_refs_.empty()
+        && attachment_refs_.empty()
+        && entries_.empty()) {
+        reset(body);
+    } else {
+        validate_shape(body);
+    }
+
+    auto existing = entries_.find(wound.event_id);
+    if (existing != entries_.end()) {
+        remove_domain_refs(existing->second.domain);
+        entries_.erase(existing);
+    }
+
+    Entry entry;
+    entry.wound = wound;
+    entry.halo = halo;
+    entry.domain = select_damage_domain(body, wound, halo);
+
+    add_domain_refs(entry.domain);
+    entries_.emplace(wound.event_id, std::move(entry));
+}
+
+bool AdaptiveDomainTracker::remove_wound(DamageEventId event_id) {
+    const auto it = entries_.find(event_id);
+    if (it == entries_.end()) {
+        return false;
+    }
+
+    remove_domain_refs(it->second.domain);
+    entries_.erase(it);
+    return true;
+}
+
+void AdaptiveDomainTracker::refit(const Body& body) {
+    validate_shape(body);
+
+    std::fill(particle_refs_.begin(), particle_refs_.end(), 0);
+    std::fill(structural_refs_.begin(), structural_refs_.end(), 0);
+    std::fill(tetrahedral_refs_.begin(), tetrahedral_refs_.end(), 0);
+    std::fill(attachment_refs_.begin(), attachment_refs_.end(), 0);
+
+    for (auto& [event_id, entry] : entries_) {
+        (void)event_id;
+        entry.domain = select_damage_domain(
+            body,
+            entry.wound,
+            entry.halo);
+        add_domain_refs(entry.domain);
+    }
+}
+
+SolverDomain AdaptiveDomainTracker::combined_solver_domain() const {
+    SolverDomain result;
+
+    auto collect = [](const auto& refs, auto& out) {
+        for (std::size_t id = 0; id < refs.size(); ++id) {
+            if (refs[id] > 0) {
+                out.push_back(id);
+            }
+        }
+    };
+
+    collect(particle_refs_, result.particles);
+    collect(structural_refs_, result.structural);
+    collect(tetrahedral_refs_, result.tetrahedral);
+    collect(attachment_refs_, result.attachments);
+
+    return result;
+}
+
 } // namespace sarx
