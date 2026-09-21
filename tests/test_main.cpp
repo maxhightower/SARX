@@ -1257,6 +1257,152 @@ void test_adaptive_domain_tracker_upsert_and_refit() {
           "refit should remove primitives that no longer overlap stored wound domains");
 }
 
+
+void check_body_soa_particle_parity(
+    const Body& body,
+    const sarx::BodySoA& soa,
+    double eps,
+    const std::string& context) {
+
+    check(soa.particles.px.size() == body.particles().size(),
+          context + ": particle count mismatch");
+
+    const std::size_t n =
+        std::min(soa.particles.px.size(), body.particles().size());
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& p = body.particles()[i];
+        check(std::abs(soa.particles.px[i] - p.position.x) <= eps
+                  && std::abs(soa.particles.py[i] - p.position.y) <= eps
+                  && std::abs(soa.particles.pz[i] - p.position.z) <= eps,
+              context + ": position parity failure");
+        check(std::abs(soa.particles.vx[i] - p.velocity.x) <= eps
+                  && std::abs(soa.particles.vy[i] - p.velocity.y) <= eps
+                  && std::abs(soa.particles.vz[i] - p.velocity.z) <= eps,
+              context + ": velocity parity failure");
+    }
+}
+
+void test_soa_full_solver_matches_body() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 3;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.4;
+    spec.include_diagonals = true;
+    spec.include_tetrahedra = true;
+    spec.structural_compliance = 1e-6;
+    spec.volume_compliance = 1e-7;
+
+    auto lattice = sarx::build_voxel_lattice(spec);
+
+    const auto root = sarx::embed_bone(
+        lattice,
+        sarx::kNoParent,
+        {0.4, 0.4, 0.4},
+        0.5,
+        1e-7);
+
+    Body cpu = lattice.body;
+    auto soa = sarx::snapshot_body_soa(lattice.body);
+
+    cpu.particles()[0].velocity = {0.5, 0.25, -0.1};
+    cpu.particles()[13].position += Vec3{0.05, 0.08, -0.03};
+
+    soa.particles.vx[0] = 0.5;
+    soa.particles.vy[0] = 0.25;
+    soa.particles.vz[0] = -0.1;
+    soa.particles.px[13] += 0.05;
+    soa.particles.py[13] += 0.08;
+    soa.particles.pz[13] -= 0.03;
+
+    check(!root.attachments.empty(),
+          "SoA full parity fixture should include animation attachments");
+
+    StepConfig cfg;
+    cfg.substeps = 3;
+    cfg.solver_iterations = 12;
+    cfg.gravity = {0.0, -2.0, 0.0};
+
+    cpu.step(1.0 / 60.0, cfg);
+    const auto stats = sarx::step_soa(soa, 1.0 / 60.0, cfg);
+
+    check_body_soa_particle_parity(
+        cpu,
+        soa,
+        1e-9,
+        "full CPU/SoA solver");
+
+    check(stats.active_particles == cpu.particles().size(),
+          "full SoA solver should report all particles active");
+    check(stats.tetrahedral_constraints
+              == cpu.tetrahedral_constraints().size(),
+          "full SoA solver should visit all tetrahedral constraints");
+}
+
+void test_soa_restricted_solver_matches_body() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 8;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.25;
+    spec.include_diagonals = false;
+    spec.include_tetrahedra = true;
+    spec.structural_compliance = 1e-6;
+    spec.volume_compliance = 1e-7;
+
+    auto lattice = sarx::build_voxel_lattice(spec);
+
+    sarx::WoundDescriptor wound;
+    wound.event_id = 3000;
+    wound.center = {0.50, 0.25, 0.25};
+    wound.radius = 0.15;
+
+    const auto adaptive =
+        sarx::select_damage_domain(lattice.body, wound, 0.25);
+    const auto domain = sarx::solver_domain(adaptive);
+
+    Body cpu = lattice.body;
+    auto soa = sarx::snapshot_body_soa(lattice.body);
+
+    check(!domain.particles.empty()
+              && !domain.structural.empty()
+              && !domain.tetrahedral.empty(),
+          "restricted CPU/SoA parity fixture should have an active local domain");
+
+    const auto moved_particle = domain.particles.front();
+    cpu.particles()[moved_particle].position += Vec3{0.02, 0.04, 0.01};
+    soa.particles.px[moved_particle] += 0.02;
+    soa.particles.py[moved_particle] += 0.04;
+    soa.particles.pz[moved_particle] += 0.01;
+
+    StepConfig cfg = no_gravity();
+    cfg.substeps = 2;
+    cfg.solver_iterations = 10;
+
+    const auto cpu_stats =
+        cpu.step_restricted(1.0 / 60.0, domain, cfg);
+    const auto soa_stats =
+        sarx::step_soa_restricted(soa, 1.0 / 60.0, domain, cfg);
+
+    check_body_soa_particle_parity(
+        cpu,
+        soa,
+        1e-9,
+        "restricted CPU/SoA solver");
+
+    check(cpu_stats.active_particles == soa_stats.active_particles
+              && cpu_stats.structural_constraints
+                  == soa_stats.structural_constraints
+              && cpu_stats.tetrahedral_constraints
+                  == soa_stats.tetrahedral_constraints
+              && cpu_stats.attachment_constraints
+                  == soa_stats.attachment_constraints
+              && cpu_stats.solver_constraint_visits
+                  == soa_stats.solver_constraint_visits,
+          "CPU and SoA restricted solvers should report identical work accounting");
+}
+
 } // namespace
 
 int main() {
@@ -1291,6 +1437,8 @@ int main() {
     test_restricted_solver_uses_frozen_boundary_anchors();
     test_adaptive_domain_tracker_incremental_union();
     test_adaptive_domain_tracker_upsert_and_refit();
+    test_soa_full_solver_matches_body();
+    test_soa_restricted_solver_matches_body();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
