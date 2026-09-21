@@ -376,6 +376,208 @@ double joint_angle(
             1.0));
 }
 
+sarx::Vec3 rotate_axis_angle(
+    const sarx::Vec3& value,
+    const sarx::Vec3& axis,
+    double angle) {
+
+    const sarx::Vec3 n =
+        sarx::normalized(axis);
+
+    if (sarx::length_squared(n) <= 1e-12) {
+        return value;
+    }
+
+    const double c = std::cos(angle);
+    const double si = std::sin(angle);
+
+    return value * c
+        + sarx::cross(n, value) * si
+        + n * (
+            sarx::dot(n, value)
+            * (1.0 - c));
+}
+
+void project_distance(
+    sarx::Particle& a,
+    sarx::Particle& b,
+    double rest_length,
+    double strength = 1.0) {
+
+    const sarx::Vec3 delta =
+        b.position - a.position;
+
+    const double length =
+        sarx::length(delta);
+
+    if (length <= 1e-12) {
+        return;
+    }
+
+    const sarx::Vec3 correction =
+        delta
+        * ((length - rest_length)
+           / length
+           * 0.5
+           * strength);
+
+    a.position += correction;
+    b.position -= correction;
+}
+
+void project_passive_joint(
+    sarx::Particle& a,
+    sarx::Particle& joint,
+    sarx::Particle& b,
+    double rest_angle,
+    double min_angle,
+    double max_angle,
+    double passive_strength,
+    double limit_strength) {
+
+    const sarx::Vec3 u =
+        a.position - joint.position;
+    const sarx::Vec3 v =
+        b.position - joint.position;
+
+    if (sarx::length_squared(u) <= 1e-12
+        || sarx::length_squared(v) <= 1e-12) {
+        return;
+    }
+
+    const double angle =
+        joint_angle(
+            a.position,
+            joint.position,
+            b.position);
+
+    double target = rest_angle;
+    double strength = passive_strength;
+
+    if (angle < min_angle) {
+        target = min_angle;
+        strength = limit_strength;
+    } else if (angle > max_angle) {
+        target = max_angle;
+        strength = limit_strength;
+    }
+
+    const sarx::Vec3 axis =
+        sarx::cross(u, v);
+
+    if (sarx::length_squared(axis) <= 1e-12) {
+        return;
+    }
+
+    const double half_correction =
+        (target - angle)
+        * strength
+        * 0.5;
+
+    const sarx::Vec3 new_u =
+        rotate_axis_angle(
+            u,
+            axis,
+            -half_correction);
+
+    const sarx::Vec3 new_v =
+        rotate_axis_angle(
+            v,
+            axis,
+            half_correction);
+
+    a.position =
+        joint.position + new_u;
+
+    b.position =
+        joint.position + new_v;
+}
+
+void damp_passive_joint(
+    sarx::Particle& a,
+    sarx::Particle& joint,
+    sarx::Particle& b,
+    double damping) {
+
+    const sarx::Vec3 u =
+        sarx::normalized(
+            a.position - joint.position);
+    const sarx::Vec3 v =
+        sarx::normalized(
+            b.position - joint.position);
+
+    if (sarx::length_squared(u) <= 1e-12
+        || sarx::length_squared(v) <= 1e-12) {
+        return;
+    }
+
+    const sarx::Vec3 rel_a =
+        a.velocity - joint.velocity;
+    const sarx::Vec3 rel_b =
+        b.velocity - joint.velocity;
+
+    const sarx::Vec3 tangent_a =
+        rel_a
+        - u * sarx::dot(rel_a, u);
+
+    const sarx::Vec3 tangent_b =
+        rel_b
+        - v * sarx::dot(rel_b, v);
+
+    a.velocity -= tangent_a * damping;
+    b.velocity -= tangent_b * damping;
+
+    joint.velocity +=
+        (tangent_a + tangent_b)
+        * (damping * 0.15);
+}
+
+bool project_segment_floor(
+    sarx::Particle& a,
+    sarx::Particle& b,
+    double radius) {
+
+    bool contacted = false;
+
+    constexpr double samples[] = {
+        0.15,
+        0.35,
+        0.50,
+        0.65,
+        0.85
+    };
+
+    for (const double t : samples) {
+        const double wa = 1.0 - t;
+        const double wb = t;
+
+        const double y =
+            a.position.y * wa
+            + b.position.y * wb;
+
+        if (y >= radius) {
+            continue;
+        }
+
+        const double denominator =
+            wa * wa + wb * wb;
+
+        if (denominator <= 1e-12) {
+            continue;
+        }
+
+        const double correction =
+            (radius - y)
+            / denominator;
+
+        a.position.y += correction * wa;
+        b.position.y += correction * wb;
+        contacted = true;
+    }
+
+    return contacted;
+}
+
 sarx::CharacterMeshFrame combine(
     const sarx::CharacterMeshFrame& body,
     const sarx::CharacterMeshFrame& detached) {
@@ -564,6 +766,7 @@ int main(int argc, char** argv) {
         sarx::CharacterMeshFrame hand_snapshot;
 
         std::array<sarx::Vec3, 4> rest_anchors{};
+        std::array<double, 3> limb_rest_lengths{};
         std::array<sarx::ParticleId, 4> limb_particles{};
 
         sarx::Body detached_motion;
@@ -573,6 +776,7 @@ int main(int argc, char** argv) {
         std::size_t detached_triangles = 0;
         std::size_t ground_contacts = 0;
         bool ever_grounded = false;
+        int first_ground_contact_frame = -1;
 
         double initial_elbow_angle = 0.0;
         double initial_wrist_angle = 0.0;
@@ -580,8 +784,8 @@ int main(int argc, char** argv) {
         double max_wrist_angle_delta = 0.0;
 
         sarx::StepConfig detached_step;
-        detached_step.substeps = 4;
-        detached_step.solver_iterations = 10;
+        detached_step.substeps = 6;
+        detached_step.solver_iterations = 16;
         detached_step.gravity = {0.0, -9.81, 0.0};
 
         const double dt = 1.0 / args.fps;
@@ -774,6 +978,15 @@ int main(int argc, char** argv) {
                             rest_anchors[2],
                             rest_anchors[3]);
 
+                    for (std::size_t i = 0;
+                         i < limb_rest_lengths.size();
+                         ++i) {
+                        limb_rest_lengths[i] =
+                            sarx::length(
+                                rest_anchors[i + 1]
+                                - rest_anchors[i]);
+                    }
+
                     boundary_triangles =
                         split.boundary_triangles_removed;
 
@@ -786,34 +999,163 @@ int main(int argc, char** argv) {
                         dt,
                         detached_step);
 
-                    constexpr double ground_radius = 0.035;
-                    constexpr double restitution = 0.16;
-                    constexpr double tangential_damping = 0.78;
+                    constexpr double ground_radius = 0.040;
+                    constexpr double restitution = 0.08;
+                    constexpr double tangential_damping = 0.66;
 
-                    for (const sarx::ParticleId id
-                         : limb_particles) {
+                    auto& particles =
+                        detached_motion.particles();
+
+                    std::array<sarx::Vec3, 4> before_contact{};
+                    std::array<bool, 4> touched{
+                        false,
+                        false,
+                        false,
+                        false
+                    };
+
+                    for (std::size_t i = 0;
+                         i < limb_particles.size();
+                         ++i) {
+                        before_contact[i] =
+                            particles[limb_particles[i]].position;
+                    }
+
+                    const double wrist_min =
+                        std::max(
+                            0.80,
+                            initial_wrist_angle - 0.75);
+
+                    const double wrist_max =
+                        std::min(
+                            3.05,
+                            initial_wrist_angle + 0.75);
+
+                    // Iterate floor contact, length preservation, and
+                    // passive joint resistance together. A forearm/hand
+                    // impact therefore pushes through the elbow instead
+                    // of letting the chain collapse like frictionless rope.
+                    for (int contact_iteration = 0;
+                         contact_iteration < 8;
+                         ++contact_iteration) {
+
+                        for (std::size_t segment = 0;
+                             segment < 3;
+                             ++segment) {
+
+                            const bool hit =
+                                project_segment_floor(
+                                    particles[
+                                        limb_particles[segment]],
+                                    particles[
+                                        limb_particles[segment + 1]],
+                                    ground_radius);
+
+                            if (hit) {
+                                touched[segment] = true;
+                                touched[segment + 1] = true;
+                            }
+                        }
+
+                        for (std::size_t segment = 0;
+                             segment < 3;
+                             ++segment) {
+                            project_distance(
+                                particles[
+                                    limb_particles[segment]],
+                                particles[
+                                    limb_particles[segment + 1]],
+                                limb_rest_lengths[segment],
+                                0.98);
+                        }
+
+                        project_passive_joint(
+                            particles[limb_particles[0]],
+                            particles[limb_particles[1]],
+                            particles[limb_particles[2]],
+                            initial_elbow_angle,
+                            0.35,
+                            3.05,
+                            0.070,
+                            0.60);
+
+                        project_passive_joint(
+                            particles[limb_particles[1]],
+                            particles[limb_particles[2]],
+                            particles[limb_particles[3]],
+                            initial_wrist_angle,
+                            wrist_min,
+                            wrist_max,
+                            0.090,
+                            0.65);
+
+                        for (std::size_t segment = 0;
+                             segment < 3;
+                             ++segment) {
+                            project_distance(
+                                particles[
+                                    limb_particles[segment]],
+                                particles[
+                                    limb_particles[segment + 1]],
+                                limb_rest_lengths[segment],
+                                0.98);
+                        }
+                    }
+
+                    damp_passive_joint(
+                        particles[limb_particles[0]],
+                        particles[limb_particles[1]],
+                        particles[limb_particles[2]],
+                        0.18);
+
+                    damp_passive_joint(
+                        particles[limb_particles[1]],
+                        particles[limb_particles[2]],
+                        particles[limb_particles[3]],
+                        0.24);
+
+                    for (std::size_t i = 0;
+                         i < limb_particles.size();
+                         ++i) {
 
                         auto& particle =
-                            detached_motion.particles()[id];
+                            particles[limb_particles[i]];
 
-                        if (particle.position.y < ground_radius) {
-                            particle.position.y = ground_radius;
+                        const sarx::Vec3 positional_impulse =
+                            (particle.position
+                             - before_contact[i])
+                            / dt;
 
-                            if (particle.velocity.y < 0.0) {
-                                particle.velocity.y =
-                                    -particle.velocity.y
-                                    * restitution;
-                            }
+                        particle.velocity +=
+                            positional_impulse * 0.22;
 
-                            particle.velocity.x *= tangential_damping;
-                            particle.velocity.z *= tangential_damping;
+                        // Small passive tissue/air damping. Gravity stays
+                        // physical; this only removes the frictionless,
+                        // instantaneous-collapse look.
+                        particle.velocity *= 0.992;
 
-                            if (std::abs(particle.velocity.y) < 0.05) {
-                                particle.velocity.y = 0.0;
-                            }
+                        if (!touched[i]) {
+                            continue;
+                        }
 
-                            ++ground_contacts;
-                            ever_grounded = true;
+                        if (particle.velocity.y < 0.0) {
+                            particle.velocity.y =
+                                -particle.velocity.y
+                                * restitution;
+                        }
+
+                        particle.velocity.x *= tangential_damping;
+                        particle.velocity.z *= tangential_damping;
+
+                        if (std::abs(particle.velocity.y) < 0.05) {
+                            particle.velocity.y = 0.0;
+                        }
+
+                        ++ground_contacts;
+                        ever_grounded = true;
+
+                        if (first_ground_contact_frame < 0) {
+                            first_ground_contact_frame = frame;
                         }
                     }
                 }
@@ -929,6 +1271,8 @@ int main(int argc, char** argv) {
             << detached_triangles
             << " ground_contacts="
             << ground_contacts
+            << " first_ground_contact_frame="
+            << first_ground_contact_frame
             << " max_elbow_delta_rad="
             << max_elbow_angle_delta
             << " max_wrist_delta_rad="
