@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           mkdir -p assets/cmu build/cmu-logs
 
-          for entry in             "91_16 CMU_Limp"             "91_24 CMU_HurtLegWalk"             "91_25 CMU_DragBadLegWalk"
+          for entry in             "91_16 CMU_Limp"             "91_24 CMU_HurtLegWalk"             "91_25 CMU_DragBadLegWalk"             "139_19 CMU_WalkWoundedLeg"             "142_12 CMU_PainfulLeftKnee"
           do
             set -- ${entry}
             source_id="$1"
@@ -74,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for semantic in CMU_Limp CMU_HurtLegWalk CMU_DragBadLegWalk
+          for semantic in CMU_Limp CMU_HurtLegWalk CMU_DragBadLegWalk CMU_WalkWoundedLeg CMU_PainfulLeftKnee
           do
             mkdir -p "build/cmu-validation/${semantic}"
 
