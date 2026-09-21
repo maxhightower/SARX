@@ -1,3 +1,4 @@
+#include "sarx/adaptive.hpp"
 #include "sarx/damage.hpp"
 #include "sarx/debug_render.hpp"
 #include "sarx/volume.hpp"
@@ -182,6 +183,11 @@ int main(int argc, char** argv) {
         camera.width = 960;
         camera.height = 540;
 
+        sarx::AdaptiveDomainTracker domain_tracker;
+        bool adaptive_active = false;
+        std::size_t restricted_visits = 0;
+        std::size_t full_equivalent_visits = 0;
+
         for (int frame = 0; frame < args.frames; ++frame) {
             if (frame < args.cut_frame) {
                 const double phase =
@@ -197,9 +203,41 @@ int main(int argc, char** argv) {
 
             if (frame == args.cut_frame) {
                 apply_severance_cut(body, damage);
+
+                domain_tracker.reset(body);
+                for (const auto& wound : damage.wounds()) {
+                    domain_tracker.upsert_wound(
+                        body,
+                        wound,
+                        0.20);
+                }
+                adaptive_active = true;
             }
 
-            body.step(1.0 / 60.0, step);
+            if (!adaptive_active) {
+                body.step(1.0 / 60.0, step);
+            } else {
+                const auto seed =
+                    domain_tracker.combined_damage_domain();
+                const auto active =
+                    sarx::close_over_free_islands(body, seed);
+                const auto domain =
+                    sarx::solver_domain(active);
+
+                const auto stats = body.step_restricted(
+                    1.0 / 60.0,
+                    domain,
+                    step);
+
+                restricted_visits += stats.solver_constraint_visits;
+
+                full_equivalent_visits +=
+                    static_cast<std::size_t>(step.substeps)
+                    * static_cast<std::size_t>(step.solver_iterations)
+                    * (body.structural_constraints().size()
+                       + body.tetrahedral_constraints().size()
+                       + body.attachments().size());
+            }
 
             sarx::write_debug_ppm(
                 frame_path(args.output, frame),
@@ -213,6 +251,17 @@ int main(int argc, char** argv) {
             << "SARX demo complete: frames=" << args.frames
             << " wounds=" << damage.wounds().size()
             << " islands=" << islands.size()
+            << " restricted_visits=" << restricted_visits
+            << " full_equivalent_visits=" << full_equivalent_visits;
+
+        if (full_equivalent_visits > 0) {
+            const double ratio =
+                static_cast<double>(restricted_visits)
+                / static_cast<double>(full_equivalent_visits);
+            std::cout << " adaptive_visit_ratio=" << ratio;
+        }
+
+        std::cout
             << " output=" << args.output.string()
             << '\n';
 
