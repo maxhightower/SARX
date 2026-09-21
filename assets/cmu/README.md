@@ -46,3 +46,19 @@ a426327f5bdb9c3eecf016a32abf2afac3b2999821c43e2b7dc47354f427e241  assets/cmu/CMU
 
 The validator also rejects implausible converted motion scale before an asset
 can be committed.
+
+
+## Retargeting method
+
+The CMU FBX skeleton and SARX Quaternius skeleton use different bone names and
+rest axes. SARX therefore does not transfer absolute source world rotations.
+The conversion workflow computes each authored source bone's animation delta
+relative to its own rest pose, changes that delta into the corresponding
+Quaternius bone's rest-space basis, and keys only the resulting target-local
+rotation. Translation/root travel remains under SARX runtime authority.
+
+This distinction is evidence-critical: an earlier absolute-world retarget
+mapped node names successfully but could rotate the entire target hierarchy
+sideways/upside-down while still passing structural tests. The media gate now
+also requires an upright head-over-pelvis relationship and sustained intact-foot
+support after the authored transition.
