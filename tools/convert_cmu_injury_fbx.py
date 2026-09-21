@@ -278,7 +278,7 @@ def main():
 
     print(
         "SARX_CMU_SOURCE_TIMING",
-        source_start,
+        motion_start_frame,
         source_end,
         scene.render.fps,
         scene.render.fps_base,
@@ -342,6 +342,83 @@ def main():
         / source_height_units
     )
 
+    # CMU FBX captures commonly begin with one or more calibration/T-pose
+    # frames. Those are capture setup, not authored injury locomotion.
+    # Detect the first frame where the arms have actually dropped from
+    # horizontal by measuring shoulder-to-hand vertical separation.
+    motion_start_frame = source_start
+    motion_start_found = False
+
+    l_shoulder_pose = source_armature.pose.bones.get("lShldr")
+    r_shoulder_pose = source_armature.pose.bones.get("rShldr")
+    l_hand_pose = source_armature.pose.bones.get("lHand")
+    r_hand_pose = source_armature.pose.bones.get("rHand")
+
+    if all(
+        bone is not None
+        for bone in (
+            l_shoulder_pose,
+            r_shoulder_pose,
+            l_hand_pose,
+            r_hand_pose,
+        )
+    ):
+        scan_end = min(
+            source_end,
+            source_start + 45,
+        )
+
+        for candidate_frame in range(
+            source_start,
+            scan_end + 1,
+        ):
+            scene.frame_set(candidate_frame)
+
+            l_shoulder_world = (
+                source_armature.matrix_world
+                @ l_shoulder_pose.matrix
+            ).translation
+
+            r_shoulder_world = (
+                source_armature.matrix_world
+                @ r_shoulder_pose.matrix
+            ).translation
+
+            l_hand_world = (
+                source_armature.matrix_world
+                @ l_hand_pose.matrix
+            ).translation
+
+            r_hand_world = (
+                source_armature.matrix_world
+                @ r_hand_pose.matrix
+            ).translation
+
+            average_hand_drop = 0.5 * (
+                (l_shoulder_world.z - l_hand_world.z)
+                + (r_shoulder_world.z - r_hand_world.z)
+            )
+
+            if average_hand_drop > source_height_units * 0.10:
+                motion_start_frame = candidate_frame
+                motion_start_found = True
+                break
+
+    if not motion_start_found:
+        # Conservative fallback: skip six 30-FPS capture setup frames.
+        motion_start_frame = min(
+            source_end,
+            source_start + 6,
+        )
+
+    print(
+        "SARX_CMU_MOTION_START",
+        clip_name,
+        f"source_start={source_start}",
+        f"motion_start={motion_start_frame}",
+        f"trimmed_frames={motion_start_frame - source_start}",
+    )
+
     root_positions = []
 
     # Bake the authored source pose into the actual Quaternius target
@@ -352,12 +429,16 @@ def main():
     # pelvis. CMU root orientation contains capture heading/root motion.
     # SARX owns world facing and continuity, so authored injury clips may
     # animate the spine and limbs but may not silently rotate the agent.
-    for frame in range(source_start, source_end + 1):
+    for frame in range(motion_start_frame, source_end + 1):
         scene.frame_set(frame)
+
+        target_frame = (
+            frame - motion_start_frame + 1
+        )
 
         root_positions.append(
             (
-                (frame - source_start) / source_fps,
+                (frame - motion_start_frame) / source_fps,
                 (
                     source_armature.matrix_world
                     @ source_root_pose.matrix
@@ -404,14 +485,16 @@ def main():
 
             target_pose.keyframe_insert(
                 data_path="rotation_quaternion",
-                frame=frame,
+                frame=target_frame,
                 group=target_name,
             )
 
     # Preserve original timing. Blender's FBX importer sets scene FPS from
     # the source file, so glTF timestamps remain in source seconds.
-    scene.frame_start = source_start
-    scene.frame_end = source_end
+    scene.frame_start = 1
+    scene.frame_end = (
+        source_end - motion_start_frame + 1
+    )
 
     # Remove the source skeleton and any imported source meshes so export
     # cannot accidentally include or target the CMU rig.
