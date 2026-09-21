@@ -364,6 +364,28 @@ Vec3 Body::total_linear_momentum() const {
 }
 
 void Body::step(double dt, const StepConfig& config) {
+    SolverDomain domain;
+
+    domain.particles.resize(particles_.size());
+    std::iota(domain.particles.begin(), domain.particles.end(), ParticleId{0});
+
+    domain.structural.resize(structural_.size());
+    std::iota(domain.structural.begin(), domain.structural.end(), ConstraintId{0});
+
+    domain.tetrahedral.resize(tetrahedral_.size());
+    std::iota(domain.tetrahedral.begin(), domain.tetrahedral.end(), ConstraintId{0});
+
+    domain.attachments.resize(attachments_.size());
+    std::iota(domain.attachments.begin(), domain.attachments.end(), ConstraintId{0});
+
+    (void)step_restricted(dt, domain, config);
+}
+
+StepStats Body::step_restricted(
+    double dt,
+    const SolverDomain& input_domain,
+    const StepConfig& config) {
+
     if (dt <= 0.0) {
         throw std::invalid_argument("dt must be positive");
     }
@@ -371,48 +393,112 @@ void Body::step(double dt, const StepConfig& config) {
         throw std::invalid_argument("step configuration counts must be positive");
     }
 
+    auto canonicalize = [](auto ids, std::size_t limit, const char* label) {
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        for (const auto id : ids) {
+            if (id >= limit) {
+                throw std::out_of_range(label);
+            }
+        }
+        return ids;
+    };
+
+    SolverDomain domain;
+    domain.particles = canonicalize(
+        input_domain.particles,
+        particles_.size(),
+        "restricted particle id out of range");
+    domain.structural = canonicalize(
+        input_domain.structural,
+        structural_.size(),
+        "restricted structural id out of range");
+    domain.tetrahedral = canonicalize(
+        input_domain.tetrahedral,
+        tetrahedral_.size(),
+        "restricted tetrahedral id out of range");
+    domain.attachments = canonicalize(
+        input_domain.attachments,
+        attachments_.size(),
+        "restricted attachment id out of range");
+
+    std::vector<std::uint8_t> active_particles(particles_.size(), 0u);
+    for (const ParticleId id : domain.particles) {
+        active_particles[id] = 1u;
+    }
+
+    StepStats stats;
+    stats.active_particles = domain.particles.size();
+    stats.structural_constraints = domain.structural.size();
+    stats.tetrahedral_constraints = domain.tetrahedral.size();
+    stats.attachment_constraints = domain.attachments.size();
+
     const double h = dt / static_cast<double>(config.substeps);
 
     for (int substep = 0; substep < config.substeps; ++substep) {
-        std::vector<Vec3> before;
-        before.reserve(particles_.size());
+        std::vector<Vec3> before(particles_.size());
 
-        for (auto& p : particles_) {
-            before.push_back(p.position);
+        for (const ParticleId id : domain.particles) {
+            auto& p = particles_[id];
+            before[id] = p.position;
+
             if (p.inverse_mass == 0.0) {
                 p.velocity = {};
                 continue;
             }
+
             p.velocity += config.gravity * h;
             p.position += p.velocity * h;
         }
 
-        for (auto& c : structural_) c.lambda = 0.0;
-        for (auto& t : tetrahedral_) t.lambda = 0.0;
-        for (auto& a : attachments_) a.lambda = {};
-
-        for (int iteration = 0; iteration < config.solver_iterations; ++iteration) {
-            solve_structural(h);
-            solve_tetrahedral(h);
-            solve_attachments(h);
+        for (const ConstraintId id : domain.structural) {
+            structural_[id].lambda = 0.0;
+        }
+        for (const ConstraintId id : domain.tetrahedral) {
+            tetrahedral_[id].lambda = 0.0;
+        }
+        for (const ConstraintId id : domain.attachments) {
+            attachments_[id].lambda = {};
         }
 
-        for (ParticleId i = 0; i < particles_.size(); ++i) {
-            auto& p = particles_[i];
+        for (int iteration = 0; iteration < config.solver_iterations; ++iteration) {
+            solve_structural(h, domain.structural, active_particles);
+            solve_tetrahedral(h, domain.tetrahedral, active_particles);
+            solve_attachments(h, domain.attachments, active_particles);
+
+            stats.solver_constraint_visits +=
+                domain.structural.size()
+                + domain.tetrahedral.size()
+                + domain.attachments.size();
+        }
+
+        for (const ParticleId id : domain.particles) {
+            auto& p = particles_[id];
             if (p.inverse_mass == 0.0) {
                 continue;
             }
-            p.velocity = (p.position - before[i]) / h;
+            p.velocity = (p.position - before[id]) / h;
         }
     }
+
+    return stats;
 }
 
-void Body::solve_structural(double h) {
-    for (auto& c : structural_) {
+void Body::solve_structural(
+    double h,
+    const std::vector<ConstraintId>& ids,
+    const std::vector<std::uint8_t>& active_particles) {
+
+    for (const ConstraintId id : ids) {
+        auto& c = structural_[id];
         if (!c.active) continue;
 
         auto& a = particles_[c.a];
         auto& b = particles_[c.b];
+
+        const double wa = active_particles[c.a] ? a.inverse_mass : 0.0;
+        const double wb = active_particles[c.b] ? b.inverse_mass : 0.0;
+        if (wa + wb <= 1e-12) continue;
 
         const Vec3 delta = b.position - a.position;
         const double len = length(delta);
@@ -420,27 +506,42 @@ void Body::solve_structural(double h) {
 
         const Vec3 n = delta / len;
         const double C = len - c.rest_length;
-        const double w = a.inverse_mass + b.inverse_mass;
         const double alpha = c.compliance / (h * h);
-        const double denom = w + alpha;
+        const double denom = wa + wb + alpha;
         if (denom <= 1e-12) continue;
 
         const double dlambda = (-C - alpha * c.lambda) / denom;
         c.lambda += dlambda;
 
-        a.position += (-n) * (a.inverse_mass * dlambda);
-        b.position += n * (b.inverse_mass * dlambda);
+        if (wa > 0.0) {
+            a.position += (-n) * (wa * dlambda);
+        }
+        if (wb > 0.0) {
+            b.position += n * (wb * dlambda);
+        }
     }
 }
 
-void Body::solve_tetrahedral(double h) {
-    for (auto& t : tetrahedral_) {
+void Body::solve_tetrahedral(
+    double h,
+    const std::vector<ConstraintId>& ids,
+    const std::vector<std::uint8_t>& active_particles) {
+
+    for (const ConstraintId id : ids) {
+        auto& t = tetrahedral_[id];
         if (!t.active) continue;
 
         auto& p0 = particles_[t.a];
         auto& p1 = particles_[t.b];
         auto& p2 = particles_[t.c];
         auto& p3 = particles_[t.d];
+
+        const double w0 = active_particles[t.a] ? p0.inverse_mass : 0.0;
+        const double w1 = active_particles[t.b] ? p1.inverse_mass : 0.0;
+        const double w2 = active_particles[t.c] ? p2.inverse_mass : 0.0;
+        const double w3 = active_particles[t.d] ? p3.inverse_mass : 0.0;
+
+        if (w0 + w1 + w2 + w3 <= 1e-12) continue;
 
         const Vec3 e10 = p1.position - p0.position;
         const Vec3 e20 = p2.position - p0.position;
@@ -455,45 +556,47 @@ void Body::solve_tetrahedral(double h) {
         const Vec3 g0 = -(g1 + g2 + g3);
 
         const double weighted_gradient =
-            p0.inverse_mass * length_squared(g0)
-            + p1.inverse_mass * length_squared(g1)
-            + p2.inverse_mass * length_squared(g2)
-            + p3.inverse_mass * length_squared(g3);
+            w0 * length_squared(g0)
+            + w1 * length_squared(g1)
+            + w2 * length_squared(g2)
+            + w3 * length_squared(g3);
 
         const double alpha = t.compliance / (h * h);
         const double denom = weighted_gradient + alpha;
-        if (denom <= 1e-12) {
-            continue;
-        }
+        if (denom <= 1e-12) continue;
 
         const double dlambda = (-C - alpha * t.lambda) / denom;
         t.lambda += dlambda;
 
-        p0.position += g0 * (p0.inverse_mass * dlambda);
-        p1.position += g1 * (p1.inverse_mass * dlambda);
-        p2.position += g2 * (p2.inverse_mass * dlambda);
-        p3.position += g3 * (p3.inverse_mass * dlambda);
+        if (w0 > 0.0) p0.position += g0 * (w0 * dlambda);
+        if (w1 > 0.0) p1.position += g1 * (w1 * dlambda);
+        if (w2 > 0.0) p2.position += g2 * (w2 * dlambda);
+        if (w3 > 0.0) p3.position += g3 * (w3 * dlambda);
     }
 }
 
-void Body::solve_attachments(double h) {
-    for (auto& a : attachments_) {
-        if (!a.active || !bone_root_connected(a.bone)) {
+void Body::solve_attachments(
+    double h,
+    const std::vector<ConstraintId>& ids,
+    const std::vector<std::uint8_t>& active_particles) {
+
+    for (const ConstraintId id : ids) {
+        auto& a = attachments_[id];
+        if (!a.active
+            || !active_particles[a.particle]
+            || !bone_root_connected(a.bone)) {
             continue;
         }
 
         auto& p = particles_[a.particle];
-        if (p.inverse_mass == 0.0) {
-            continue;
-        }
+        if (p.inverse_mass == 0.0) continue;
 
-        const Vec3 target = bones_[a.bone].animated_position + a.local_offset;
+        const Vec3 target =
+            bones_[a.bone].animated_position + a.local_offset;
         const Vec3 C = p.position - target;
         const double alpha = a.compliance / (h * h);
         const double denom = p.inverse_mass + alpha;
-        if (denom <= 1e-12) {
-            continue;
-        }
+        if (denom <= 1e-12) continue;
 
         const Vec3 dlambda = (-C - a.lambda * alpha) / denom;
         a.lambda += dlambda;
