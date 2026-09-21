@@ -371,10 +371,14 @@ DamageReport DamageSystem::apply_capsule(
         const Vec3 p1 = body.particles()[c.b].position;
         const auto hit = segment_segment_distance(damage.a, damage.b, p0, p1);
         auto material = materials_.get(c.material);
+        const Vec3 rest_fiber =
+            length_squared(c.material_fiber_rest) > 1e-12
+            ? c.material_fiber_rest
+            : material.fiber_direction;
         material.fiber_direction = rotate_between(
             c.rest_direction,
             p1 - p0,
-            material.fiber_direction);
+            rest_fiber);
         const double amount = damage_from_distance(
             hit.distance_squared,
             damage.radius,
