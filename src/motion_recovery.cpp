@@ -51,6 +51,102 @@ double speed_of(const Vec3& velocity) {
         + velocity.z * velocity.z);
 }
 
+MotionCandidateScore score_grounded_candidate(
+    MotionStrategy strategy,
+    const std::string& motion_id,
+    bool procedural,
+    BehavioralIntent intent,
+    double physical_feasibility,
+    double transition_continuity) {
+
+    MotionCandidateScore candidate;
+    candidate.strategy = strategy;
+    candidate.motion_id = motion_id;
+    candidate.procedural = procedural;
+
+    switch (strategy) {
+    case MotionStrategy::Prone:
+        candidate.intent_preservation =
+            intent == BehavioralIntent::RecoverBalance
+            ? 0.35
+            : intent == BehavioralIntent::MoveForward
+            ? 0.15
+            : 0.30;
+        break;
+
+    case MotionStrategy::Kneel:
+        candidate.intent_preservation =
+            intent == BehavioralIntent::RecoverBalance
+            ? 0.90
+            : intent == BehavioralIntent::Stand
+            ? 0.78
+            : intent == BehavioralIntent::MoveForward
+            ? 0.45
+            : 0.62;
+        break;
+
+    case MotionStrategy::GetUp:
+        candidate.intent_preservation =
+            intent == BehavioralIntent::Stand
+            ? 1.0
+            : intent == BehavioralIntent::MoveForward
+            ? 0.90
+            : 0.72;
+        break;
+
+    case MotionStrategy::Crawl:
+        candidate.intent_preservation =
+            intent == BehavioralIntent::MoveForward
+            ? 0.90
+            : 0.48;
+        break;
+
+    case MotionStrategy::Hop:
+        candidate.intent_preservation =
+            intent == BehavioralIntent::MoveForward
+            ? 0.88
+            : 0.42;
+        break;
+
+    default:
+        candidate.intent_preservation = 0.40;
+        break;
+    }
+
+    candidate.physical_feasibility =
+        physical_feasibility;
+
+    candidate.transition_continuity =
+        transition_continuity;
+
+    candidate.total =
+        candidate.intent_preservation * 0.30
+        + candidate.physical_feasibility * 0.50
+        + candidate.transition_continuity * 0.20;
+
+    return candidate;
+}
+
+bool viability_allows(
+    const std::string& motion_id,
+    const std::vector<AnatomicalAvailability>& anatomy,
+    const MotionPhysicalState& physical_state) {
+
+    MotionPhysicalContext context;
+    context.has_support_contacts = true;
+    context.support_contacts =
+        physical_state.support_contacts;
+    context.has_grounded_state = true;
+    context.grounded =
+        physical_state.grounded;
+
+    return evaluate_motion_viability(
+        motion_id,
+        anatomy,
+        context).state
+        != MotionViability::Invalid;
+}
+
 MotionCandidateScore score_fall_candidate(
     const std::string& motion_id,
     bool procedural,
@@ -193,6 +289,153 @@ MotionRecoveryPlan plan_motion_recovery(
     return plan;
 }
 
+GroundedRecoveryPlan plan_grounded_recovery(
+    BehavioralIntent intent,
+    GroundedPosture current_posture,
+    const std::vector<std::string>& available_motions,
+    const std::vector<AnatomicalAvailability>& anatomy,
+    const MotionPhysicalState& physical_state) {
+
+    GroundedRecoveryPlan plan;
+    plan.current_posture = current_posture;
+
+    // M2-C only chooses post-fall recovery posture. Intent-preserving
+    // locomotion alternatives are reported separately for M2-D so a
+    // recovery-state planner cannot silently turn into a locomotion
+    // controller.
+    plan.candidates.push_back(
+        score_grounded_candidate(
+            MotionStrategy::Prone,
+            "HoldProne",
+            true,
+            intent,
+            physical_state.grounded ? 1.0 : 0.35,
+            1.0));
+
+    if (physical_state.grounded) {
+        if (const std::string* kneel =
+                find_motion(
+                    available_motions,
+                    {"Kneel"})) {
+
+            if (viability_allows(
+                    *kneel,
+                    anatomy,
+                    physical_state)) {
+
+                plan.candidates.push_back(
+                    score_grounded_candidate(
+                        MotionStrategy::Kneel,
+                        *kneel,
+                        false,
+                        intent,
+                        0.94,
+                        0.82));
+            }
+        }
+
+        if (const std::string* get_up =
+                find_motion(
+                    available_motions,
+                    {
+                        "GetUp",
+                        "Get_Up",
+                        "Stand_Up",
+                        "StandUp"
+                    })) {
+
+            if (viability_allows(
+                    *get_up,
+                    anatomy,
+                    physical_state)) {
+
+                plan.candidates.push_back(
+                    score_grounded_candidate(
+                        MotionStrategy::GetUp,
+                        *get_up,
+                        false,
+                        intent,
+                        0.90,
+                        0.72));
+            }
+        }
+
+        if (viability_allows(
+                "ProceduralCrawl",
+                anatomy,
+                physical_state)) {
+
+            plan.followup_locomotion_options.push_back(
+                score_grounded_candidate(
+                    MotionStrategy::Crawl,
+                    "ProceduralCrawl",
+                    true,
+                    intent,
+                    0.82,
+                    0.55));
+        }
+
+        if (viability_allows(
+                "ProceduralHop",
+                anatomy,
+                physical_state)) {
+
+            plan.followup_locomotion_options.push_back(
+                score_grounded_candidate(
+                    MotionStrategy::Hop,
+                    "ProceduralHop",
+                    true,
+                    intent,
+                    0.78,
+                    0.50));
+        }
+    }
+
+    const auto best =
+        std::max_element(
+            plan.candidates.begin(),
+            plan.candidates.end(),
+            [](const MotionCandidateScore& a,
+               const MotionCandidateScore& b) {
+
+                if (a.total != b.total) {
+                    return a.total < b.total;
+                }
+
+                return a.procedural && !b.procedural;
+            });
+
+    if (best == plan.candidates.end()) {
+        return plan;
+    }
+
+    plan.strategy = best->strategy;
+    plan.motion_id = best->motion_id;
+    plan.procedural = best->procedural;
+    plan.score = best->total;
+
+    switch (plan.strategy) {
+    case MotionStrategy::Kneel:
+        plan.target_posture =
+            GroundedPosture::Kneeling;
+        break;
+    case MotionStrategy::GetUp:
+        plan.target_posture =
+            GroundedPosture::Standing;
+        break;
+    default:
+        plan.target_posture =
+            GroundedPosture::Prone;
+        break;
+    }
+
+    plan.transition_required =
+        plan.target_posture
+        != current_posture;
+
+    return plan;
+}
+
 const char* motion_strategy_name(
     MotionStrategy strategy) {
 
@@ -205,6 +448,8 @@ const char* motion_strategy_name(
         return "Kneel";
     case MotionStrategy::Prone:
         return "Prone";
+    case MotionStrategy::GetUp:
+        return "GetUp";
     case MotionStrategy::Hop:
         return "Hop";
     case MotionStrategy::Crawl:
