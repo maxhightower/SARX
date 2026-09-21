@@ -335,6 +335,93 @@ SegmentDistanceResult segment_tetra_distance(
     return best;
 }
 
+struct PlaneDiskHit {
+    bool hit{false};
+    Vec3 position{};
+    double radial_distance_squared{};
+};
+
+PlaneDiskHit segment_plane_disk_hit(
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& center,
+    const Vec3& normal,
+    double radius) {
+
+    constexpr double eps = 1e-10;
+    const double da = dot(a - center, normal);
+    const double db = dot(b - center, normal);
+
+    // A segment lying in the cut plane is not a crossing connection.
+    if (std::abs(da) <= eps && std::abs(db) <= eps) {
+        return {};
+    }
+
+    const double denom = da - db;
+    if (std::abs(denom) <= eps) {
+        return {};
+    }
+
+    const double t = da / denom;
+    if (t < -eps || t > 1.0 + eps) {
+        return {};
+    }
+
+    const Vec3 hit =
+        a + (b - a) * std::clamp(t, 0.0, 1.0);
+    const double radial_sq = length_squared(hit - center);
+
+    if (radial_sq > radius * radius) {
+        return {};
+    }
+
+    return {true, hit, radial_sq};
+}
+
+PlaneDiskHit tetra_plane_disk_hit(
+    const Vec3& center,
+    const Vec3& normal,
+    double radius,
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& d) {
+
+    if (point_in_tetra(center, a, b, c, d)) {
+        return {true, center, 0.0};
+    }
+
+    const std::array<std::array<Vec3, 2>, 6> edges{{
+        {a, b},
+        {a, c},
+        {a, d},
+        {b, c},
+        {b, d},
+        {c, d}
+    }};
+
+    PlaneDiskHit best;
+    best.radial_distance_squared =
+        std::numeric_limits<double>::infinity();
+
+    for (const auto& edge : edges) {
+        const auto hit = segment_plane_disk_hit(
+            edge[0],
+            edge[1],
+            center,
+            normal,
+            radius);
+
+        if (hit.hit
+            && hit.radial_distance_squared
+                < best.radial_distance_squared) {
+            best = hit;
+        }
+    }
+
+    return best;
+}
+
 DamageCandidates all_candidates(const Body& body) {
     DamageCandidates candidates;
     candidates.structural.reserve(body.structural_constraints().size());
@@ -451,12 +538,10 @@ DamageReport DamageSystem::apply_capsule(
 
     CapsuleDamage damage = input;
     damage.event_id = resolve_event_id(damage.event_id);
-    history_.push_back(DamageCommand{
-        DamageCommandKind::Capsule,
-        damage,
-        {},
-        {}
-    });
+    DamageCommand command;
+    command.kind = DamageCommandKind::Capsule;
+    command.capsule = damage;
+    history_.push_back(command);
 
     DamageReport report;
     report.event_id = damage.event_id;
@@ -634,6 +719,246 @@ DamageReport DamageSystem::apply_capsule(
     return report;
 }
 
+DamageReport DamageSystem::apply_plane_cut(
+    Body& body,
+    const PlaneCutDamage& input) {
+
+    if (input.radius <= 0.0
+        || input.energy < 0.0
+        || length_squared(input.normal) <= 1e-12) {
+        throw std::invalid_argument("invalid plane cut damage");
+    }
+
+    PlaneCutDamage damage = input;
+    damage.normal = normalized(damage.normal);
+    damage.event_id = resolve_event_id(damage.event_id);
+
+    DamageCommand command;
+    command.kind = DamageCommandKind::PlaneCut;
+    command.plane_cut = damage;
+    history_.push_back(command);
+
+    DamageReport report;
+    report.event_id = damage.event_id;
+
+    const auto structural_snapshot = body.structural_constraints();
+    for (ConstraintId id = 0; id < structural_snapshot.size(); ++id) {
+        const auto& constraint = structural_snapshot[id];
+        if (!constraint.active) continue;
+
+        const Vec3 p0 = body.particles()[constraint.a].position;
+        const Vec3 p1 = body.particles()[constraint.b].position;
+        const auto hit = segment_plane_disk_hit(
+            p0,
+            p1,
+            damage.center,
+            damage.normal,
+            damage.radius);
+        if (!hit.hit) continue;
+
+        auto material = materials_.get(constraint.material);
+        const Vec3 rest_fiber =
+            length_squared(constraint.material_fiber_rest) > 1e-12
+            ? constraint.material_fiber_rest
+            : material.fiber_direction;
+        material.fiber_direction = rotate_between(
+            constraint.rest_direction,
+            p1 - p0,
+            rest_fiber);
+
+        const double amount = damage_from_distance(
+            hit.radial_distance_squared,
+            damage.radius,
+            damage.energy,
+            resistance_for(
+                material,
+                DamageMode::Cut,
+                p1 - p0));
+        if (amount <= 0.0) continue;
+
+        const bool was_active = constraint.active;
+        body.damage_structural(id, amount);
+        const bool broke =
+            was_active && !body.structural_constraints()[id].active;
+
+        append_event(
+            report,
+            damage.event_id,
+            DamageSource::Spatial,
+            DamageTargetKind::StructuralConstraint,
+            id,
+            constraint.material,
+            hit.position,
+            amount,
+            broke);
+    }
+
+    const auto tetra_snapshot = body.tetrahedral_constraints();
+    for (ConstraintId id = 0; id < tetra_snapshot.size(); ++id) {
+        const auto& tet = tetra_snapshot[id];
+        if (!tet.active) continue;
+
+        const Vec3 p0 = body.particles()[tet.a].position;
+        const Vec3 p1 = body.particles()[tet.b].position;
+        const Vec3 p2 = body.particles()[tet.c].position;
+        const Vec3 p3 = body.particles()[tet.d].position;
+
+        const auto hit = tetra_plane_disk_hit(
+            damage.center,
+            damage.normal,
+            damage.radius,
+            p0,
+            p1,
+            p2,
+            p3);
+        if (!hit.hit) continue;
+
+        const auto material = materials_.get(tet.material);
+        const double amount = damage_from_distance(
+            hit.radial_distance_squared,
+            damage.radius,
+            damage.energy,
+            material.cut_resistance);
+        if (amount <= 0.0) continue;
+
+        const bool was_active = tet.active;
+        body.damage_tetrahedral(id, amount);
+        const bool broke =
+            was_active && !body.tetrahedral_constraints()[id].active;
+
+        append_event(
+            report,
+            damage.event_id,
+            DamageSource::Spatial,
+            DamageTargetKind::TetrahedralConstraint,
+            id,
+            tet.material,
+            hit.position,
+            amount,
+            broke);
+    }
+
+    const auto attachment_snapshot = body.attachments();
+    for (ConstraintId id = 0; id < attachment_snapshot.size(); ++id) {
+        const auto& attachment = attachment_snapshot[id];
+        if (!attachment.active) continue;
+
+        const Vec3 p0 =
+            body.particles()[attachment.particle].position;
+        const Vec3 p1 =
+            body.bones()[attachment.bone].animated_position
+            + attachment.local_offset;
+
+        const auto hit = segment_plane_disk_hit(
+            p0,
+            p1,
+            damage.center,
+            damage.normal,
+            damage.radius);
+        if (!hit.hit) continue;
+
+        const auto material = materials_.get(attachment.material);
+        const double amount = damage_from_distance(
+            hit.radial_distance_squared,
+            damage.radius,
+            damage.energy,
+            resistance_for(
+                material,
+                DamageMode::Cut,
+                p1 - p0));
+        if (amount <= 0.0) continue;
+
+        const bool was_active = attachment.active;
+        body.damage_attachment(id, amount);
+        const bool broke =
+            was_active && !body.attachments()[id].active;
+
+        append_event(
+            report,
+            damage.event_id,
+            DamageSource::Spatial,
+            DamageTargetKind::AttachmentConstraint,
+            id,
+            attachment.material,
+            hit.position,
+            amount,
+            broke);
+    }
+
+    const auto bone_snapshot = body.bones();
+    for (BoneId id = 0; id < bone_snapshot.size(); ++id) {
+        const auto& bone = bone_snapshot[id];
+        if (bone.parent == kNoParent
+            || !bone.joint_to_parent_active) {
+            continue;
+        }
+
+        const Vec3 p0 =
+            bone_snapshot[bone.parent].animated_position;
+        const Vec3 p1 = bone.animated_position;
+
+        const auto hit = segment_plane_disk_hit(
+            p0,
+            p1,
+            damage.center,
+            damage.normal,
+            damage.radius + bone.joint_radius);
+        if (!hit.hit) continue;
+
+        const auto material =
+            materials_.get(bone.joint_material);
+        const double amount = damage_from_distance(
+            hit.radial_distance_squared,
+            damage.radius + bone.joint_radius,
+            damage.energy,
+            resistance_for(
+                material,
+                DamageMode::Cut,
+                p1 - p0));
+        if (amount <= 0.0) continue;
+
+        const bool was_active = bone.joint_to_parent_active;
+        body.damage_bone_joint(id, amount);
+        const bool broke =
+            was_active && !body.bones()[id].joint_to_parent_active;
+
+        append_event(
+            report,
+            damage.event_id,
+            DamageSource::Spatial,
+            DamageTargetKind::BoneJoint,
+            id,
+            bone.joint_material,
+            hit.position,
+            amount,
+            broke);
+    }
+
+    if (report.broken_count() > 0) {
+        Vec3 center{};
+        std::size_t broken = 0;
+
+        for (const auto& event : report.events) {
+            if (!event.broke) continue;
+            center += event.position;
+            ++broken;
+        }
+
+        if (broken > 0) {
+            center = center / static_cast<double>(broken);
+            wounds_.push_back(WoundDescriptor{
+                damage.event_id,
+                center,
+                damage.normal,
+                damage.radius,
+                broken
+            });
+        }
+    }
+
+    return report;
+}
+
 DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& input) {
     return apply_sphere(body, input, all_candidates(body));
 }
@@ -649,12 +974,10 @@ DamageReport DamageSystem::apply_sphere(
 
     SphereDamage damage = input;
     damage.event_id = resolve_event_id(damage.event_id);
-    history_.push_back(DamageCommand{
-        DamageCommandKind::Sphere,
-        {},
-        damage,
-        {}
-    });
+    DamageCommand command;
+    command.kind = DamageCommandKind::Sphere;
+    command.sphere = damage;
+    history_.push_back(command);
 
     DamageReport report;
     report.event_id = damage.event_id;
@@ -765,12 +1088,10 @@ DamageReport DamageSystem::apply_strain(Body& body, const StrainDamage& input) {
 
     StrainDamage damage = input;
     damage.event_id = resolve_event_id(damage.event_id);
-    history_.push_back(DamageCommand{
-        DamageCommandKind::Strain,
-        {},
-        {},
-        damage
-    });
+    DamageCommand command;
+    command.kind = DamageCommandKind::Strain;
+    command.strain = damage;
+    history_.push_back(command);
 
     DamageReport report;
     report.event_id = damage.event_id;
@@ -822,6 +1143,8 @@ DamageReport DamageSystem::apply(Body& body, const DamageCommand& command) {
     switch (command.kind) {
     case DamageCommandKind::Capsule:
         return apply_capsule(body, command.capsule);
+    case DamageCommandKind::PlaneCut:
+        return apply_plane_cut(body, command.plane_cut);
     case DamageCommandKind::Sphere:
         return apply_sphere(body, command.sphere);
     case DamageCommandKind::Strain:
