@@ -13,7 +13,7 @@ SARX separates four representations:
 3. **Dynamic islands** — topology failure creates connected components that can lose rig authority and become free physics.
 4. **Render representation** — visual detail will remain decoupled from physical resolution.
 
-## Current reference milestone: V0.3
+## Current reference milestone: V0.4A
 
 The renderer-independent CPU reference now covers:
 
@@ -29,9 +29,14 @@ The renderer-independent CPU reference now covers:
 - fracture-event records,
 - persistent wound descriptors,
 - uniform-grid broad-phase candidate rejection,
-- full-scan versus accelerated-path parity tests.
+- full-scan versus accelerated-path parity tests,
+- generated 3D voxel-style particle lattices,
+- deterministic lattice indexing and structural connectivity,
+- spatial material regions,
+- optional diagonal/shear connectivity,
+- automatic root/child bone embedding and particle attachment generation.
 
-The next milestone moves from generic graph fixtures toward a real destructible volumetric character representation and GPU-oriented data layout.
+The next stage adds deforming local material frames, joint capsules, and explicit volume-preserving constraints before the GPU migration.
 
 ## Status
 
