@@ -11,6 +11,8 @@ CLIPS = {
     "91_16.fbx": "CMU_Limp",
     "91_24.fbx": "CMU_HurtLegWalk",
     "91_25.fbx": "CMU_DragBadLegWalk",
+    "139_19.fbx": "CMU_WalkWoundedLeg",
+    "142_12.fbx": "CMU_PainfulLeftKnee",
 }
 
 def main() -> int:
