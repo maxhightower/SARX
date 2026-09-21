@@ -70,7 +70,8 @@ VoxelLattice build_voxel_lattice(
     }
     if (spec.structural_compliance < 0.0
         || spec.structural_break_damage <= 0.0
-        || spec.volume_compliance < 0.0) {
+        || spec.volume_compliance < 0.0
+        || spec.volume_break_damage <= 0.0) {
         throw std::invalid_argument("invalid voxel lattice structural parameters");
     }
 
@@ -191,6 +192,7 @@ VoxelLattice build_voxel_lattice(
                             tet[2],
                             tet[3],
                             spec.volume_compliance,
+                            spec.volume_break_damage,
                             material);
                     }
                 }
