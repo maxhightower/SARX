@@ -1,0 +1,12 @@
+build/
+out/
+.vscode/
+.idea/
+*.user
+*.suo
+*.VC.db
+CMakeUserPresets.json
+
+papers/local/
+
+media/raw/

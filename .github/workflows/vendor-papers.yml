@@ -1,0 +1,52 @@
+name: Vendor redistributable papers
+
+on:
+  push:
+    branches:
+      - research/v0-breakable-animation
+    paths:
+      - "papers/vendor-manifest.tsv"
+      - ".github/workflows/vendor-papers.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  vendor-papers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Download licensed PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p papers/vendor
+
+          while IFS=$'\t' read -r filename url license source; do
+            [[ -z "${filename}" || "${filename}" == \#* ]] && continue
+            echo "Downloading ${filename} (${license})"
+            curl --fail --location --retry 3 --retry-delay 2 \
+              --user-agent "SARX paper vendor workflow/1.0" \
+              "${url}" \
+              --output "papers/vendor/${filename}"
+          done < papers/vendor-manifest.tsv
+
+      - name: Commit vendored PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add papers/vendor
+          if git diff --cached --quiet; then
+            echo "No paper changes."
+            exit 0
+          fi
+
+          git config user.name "sarx-research-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Vendor redistributable research PDFs"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

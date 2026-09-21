@@ -1,0 +1,63 @@
+name: Vendor Quaternius character assets
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/v0-breakable-animation
+    paths:
+      - "assets/quaternius/vendor-manifest.tsv"
+      - ".github/workflows/vendor-character-assets.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  vendor-assets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Download and verify CC0 assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets/quaternius
+
+          while IFS=$'\t' read -r filename url expected; do
+            [[ -z "${filename}" || "${filename}" == \#* ]] && continue
+
+            echo "Downloading ${filename}"
+            curl --fail --location --retry 3 --retry-delay 2 \
+              --user-agent "SARX Quaternius asset vendor/1.0" \
+              "${url}" \
+              --output "assets/quaternius/${filename}"
+
+            actual="$(sha256sum "assets/quaternius/${filename}" | awk '{print $1}')"
+            if [[ "${actual}" != "${expected}" ]]; then
+              echo "SHA-256 mismatch for ${filename}"
+              echo "expected: ${expected}"
+              echo "actual:   ${actual}"
+              exit 1
+            fi
+          done < assets/quaternius/vendor-manifest.tsv
+
+      - name: Commit vendored assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add assets/quaternius/*.glb
+
+          if git diff --cached --quiet; then
+            echo "Character assets already up to date."
+            exit 0
+          fi
+
+          git config user.name "sarx-research-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Vendor CC0 Quaternius character integration assets"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
