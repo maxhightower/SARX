@@ -110,5 +110,39 @@ if (SARX_BUILD_TESTS)
                 --cut-frame 2
                 --fps 30
         )
+
+        add_test(
+            NAME sarx_real_character_all_clips
+            COMMAND sarx_character_demo
+                --character ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/character.glb
+                --animations ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/animations.glb
+                --clip Walk
+                --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_real_character_validation
+                --frames 1
+                --fps 30
+                --validate-all-clips
+        )
+
+        foreach(SARX_DETACH_ROOT
+            upperarm_l
+            upperarm_r
+            lowerarm_r
+            thigh_l
+            calf_r
+        )
+            add_test(
+                NAME sarx_real_branch_${SARX_DETACH_ROOT}
+                COMMAND sarx_character_severance_demo
+                    --character ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/character.glb
+                    --animations ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/animations.glb
+                    --clip Walk
+                    --detach-root ${SARX_DETACH_ROOT}
+                    --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_branch_${SARX_DETACH_ROOT}
+                    --frames 5
+                    --cut-frame 2
+                    --fps 30
+                    --validate-branch-only
+            )
+        endforeach()
     endif()
 endif()
