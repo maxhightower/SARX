@@ -483,68 +483,122 @@ def main():
     ):
         stable_start_index = 1
 
-    stable_start = root_positions[
+    smoothing_radius = 3
+
+    scaled_positions = []
+
+    for time_seconds, root_world in root_positions:
+        scaled_positions.append(
+            (
+                time_seconds,
+                (
+                    root_world.x * root_unit_scale,
+                    root_world.y * root_unit_scale,
+                    root_world.z * root_unit_scale,
+                ),
+            )
+        )
+
+    smoothed_positions = []
+
+    for index, (time_seconds, _) in enumerate(
+        scaled_positions
+    ):
+        if index < stable_start_index:
+            stable_position = scaled_positions[
+                stable_start_index
+            ][1]
+            smoothed_positions.append(
+                (time_seconds, stable_position)
+            )
+            continue
+
+        lower = max(
+            stable_start_index,
+            index - smoothing_radius,
+        )
+        upper = min(
+            len(scaled_positions),
+            index + smoothing_radius + 1,
+        )
+
+        count = upper - lower
+
+        sx = sum(
+            scaled_positions[i][1][0]
+            for i in range(lower, upper)
+        ) / count
+
+        sy = sum(
+            scaled_positions[i][1][1]
+            for i in range(lower, upper)
+        ) / count
+
+        sz = sum(
+            scaled_positions[i][1][2]
+            for i in range(lower, upper)
+        ) / count
+
+        smoothed_positions.append(
+            (
+                time_seconds,
+                (sx, sy, sz),
+            )
+        )
+
+    stable_start = smoothed_positions[
         stable_start_index
     ][1]
-
-    end_root = root_positions[-1][1]
-
-    forward_x = end_root.x - stable_start.x
-    forward_y = end_root.y - stable_start.y
-    forward_length = (
-        forward_x * forward_x
-        + forward_y * forward_y
-    ) ** 0.5
-
-    if forward_length <= 1e-9:
-        # Fall back to the dominant early displacement rather than
-        # inventing movement if a clip is effectively in-place.
-        for index in range(
-            stable_start_index + 1,
-            len(root_positions),
-        ):
-            candidate = root_positions[index][1]
-            forward_x = candidate.x - stable_start.x
-            forward_y = candidate.y - stable_start.y
-            forward_length = (
-                forward_x * forward_x
-                + forward_y * forward_y
-            ) ** 0.5
-            if forward_length > median_step * 4.0:
-                break
-
-    if forward_length > 1e-9:
-        forward_x /= forward_length
-        forward_y /= forward_length
-    else:
-        forward_x = 0.0
-        forward_y = 0.0
 
     root_samples = []
     min_vertical = 0.0
     max_vertical = 0.0
+    cumulative_distance = 0.0
 
-    for time_seconds, root_world in root_positions:
-        dx = root_world.x - stable_start.x
-        dy = root_world.y - stable_start.y
+    previous_horizontal = (
+        stable_start[0],
+        stable_start[1],
+    )
 
-        distance_m = (
-            dx * forward_x
-            + dy * forward_y
-        ) * root_unit_scale
+    for index, (
+        time_seconds,
+        root_world,
+    ) in enumerate(smoothed_positions):
 
-        vertical_m = (
-            root_world.z
-            - stable_start.z
-        ) * root_unit_scale
-
-        # Before the stable motion origin, suppress the FBX bind-to-motion
-        # discontinuity instead of turning it into instantaneous travel.
-        if time_seconds < root_positions[
-            stable_start_index
-        ][0]:
+        if index < stable_start_index:
             distance_m = 0.0
             vertical_m = 0.0
+        else:
+            current_horizontal = (
+                root_world[0],
+                root_world[1],
+            )
+
+            if index > stable_start_index:
+                dx = (
+                    current_horizontal[0]
+                    - previous_horizontal[0]
+                )
+                dy = (
+                    current_horizontal[1]
+                    - previous_horizontal[1]
+                )
+
+                cumulative_distance += (
+                    dx * dx
+                    + dy * dy
+                ) ** 0.5
+
+            distance_m = cumulative_distance
+
+            vertical_m = (
+                root_world[2]
+                - stable_start[2]
+            )
+
+            previous_horizontal = (
+                current_horizontal
+            )
 
         min_vertical = min(
             min_vertical,
@@ -583,6 +637,7 @@ def main():
         f"samples={len(root_samples)}",
         f"stable_start_index={stable_start_index}",
         f"unit_scale={root_unit_scale:.9f}",
+        f"smoothing_radius_frames={smoothing_radius}",
         f"distance_m={final_distance_m:.9f}",
         f"vertical_min_m={min_vertical:.9f}",
         f"vertical_max_m={max_vertical:.9f}",
