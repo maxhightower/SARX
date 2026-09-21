@@ -138,6 +138,31 @@ Vec3 midpoint(const Vec3& a, const Vec3& b) {
     return (a + b) * 0.5;
 }
 
+DamageCandidates all_candidates(const Body& body) {
+    DamageCandidates candidates;
+    candidates.structural.reserve(body.structural_constraints().size());
+    candidates.attachments.reserve(body.attachments().size());
+    candidates.bone_joints.reserve(body.bones().size());
+
+    for (ConstraintId id = 0; id < body.structural_constraints().size(); ++id) {
+        if (body.structural_constraints()[id].active) {
+            candidates.structural.push_back(id);
+        }
+    }
+    for (ConstraintId id = 0; id < body.attachments().size(); ++id) {
+        if (body.attachments()[id].active) {
+            candidates.attachments.push_back(id);
+        }
+    }
+    for (BoneId id = 0; id < body.bones().size(); ++id) {
+        const auto& bone = body.bones()[id];
+        if (bone.parent != kNoParent && bone.joint_to_parent_active) {
+            candidates.bone_joints.push_back(id);
+        }
+    }
+    return candidates;
+}
+
 void append_event(
     DamageReport& report,
     DamageEventId event_id,
@@ -185,6 +210,10 @@ MaterialResponse MaterialTable::get(MaterialId material) const {
     return it == responses_.end() ? MaterialResponse{} : it->second;
 }
 
+std::size_t DamageCandidates::size() const {
+    return structural.size() + attachments.size() + bone_joints.size();
+}
+
 std::size_t DamageReport::broken_count() const {
     return static_cast<std::size_t>(std::count_if(
         events.begin(),
@@ -202,6 +231,14 @@ DamageEventId DamageSystem::resolve_event_id(DamageEventId requested) {
 }
 
 DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& input) {
+    return apply_capsule(body, input, all_candidates(body));
+}
+
+DamageReport DamageSystem::apply_capsule(
+    Body& body,
+    const CapsuleDamage& input,
+    const DamageCandidates& candidates) {
+
     if (input.radius <= 0.0 || input.energy < 0.0) {
         throw std::invalid_argument("invalid capsule damage");
     }
@@ -219,7 +256,8 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& input)
     report.event_id = damage.event_id;
 
     const auto structural_snapshot = body.structural_constraints();
-    for (ConstraintId id = 0; id < structural_snapshot.size(); ++id) {
+    for (ConstraintId id : candidates.structural) {
+        if (id >= structural_snapshot.size()) continue;
         const auto& c = structural_snapshot[id];
         if (!c.active) continue;
 
@@ -250,7 +288,8 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& input)
     }
 
     const auto attachment_snapshot = body.attachments();
-    for (ConstraintId id = 0; id < attachment_snapshot.size(); ++id) {
+    for (ConstraintId id : candidates.attachments) {
+        if (id >= attachment_snapshot.size()) continue;
         const auto& a = attachment_snapshot[id];
         if (!a.active) continue;
 
@@ -281,7 +320,8 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& input)
     }
 
     const auto bone_snapshot = body.bones();
-    for (BoneId id = 0; id < bone_snapshot.size(); ++id) {
+    for (BoneId id : candidates.bone_joints) {
+        if (id >= bone_snapshot.size()) continue;
         const auto& bone = bone_snapshot[id];
         if (bone.parent == kNoParent || !bone.joint_to_parent_active) continue;
 
@@ -335,6 +375,14 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& input)
 }
 
 DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& input) {
+    return apply_sphere(body, input, all_candidates(body));
+}
+
+DamageReport DamageSystem::apply_sphere(
+    Body& body,
+    const SphereDamage& input,
+    const DamageCandidates& candidates) {
+
     if (input.radius <= 0.0 || input.energy < 0.0) {
         throw std::invalid_argument("invalid sphere damage");
     }
@@ -352,7 +400,8 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& input) {
     report.event_id = damage.event_id;
 
     const auto structural_snapshot = body.structural_constraints();
-    for (ConstraintId id = 0; id < structural_snapshot.size(); ++id) {
+    for (ConstraintId id : candidates.structural) {
+        if (id >= structural_snapshot.size()) continue;
         const auto& c = structural_snapshot[id];
         if (!c.active) continue;
 
@@ -383,7 +432,8 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& input) {
     }
 
     const auto attachment_snapshot = body.attachments();
-    for (ConstraintId id = 0; id < attachment_snapshot.size(); ++id) {
+    for (ConstraintId id : candidates.attachments) {
+        if (id >= attachment_snapshot.size()) continue;
         const auto& a = attachment_snapshot[id];
         if (!a.active) continue;
 
@@ -414,7 +464,8 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& input) {
     }
 
     const auto bone_snapshot = body.bones();
-    for (BoneId id = 0; id < bone_snapshot.size(); ++id) {
+    for (BoneId id : candidates.bone_joints) {
+        if (id >= bone_snapshot.size()) continue;
         const auto& bone = bone_snapshot[id];
         if (bone.parent == kNoParent || !bone.joint_to_parent_active) continue;
 
