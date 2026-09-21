@@ -716,6 +716,12 @@ int main(int argc, char** argv) {
                         0.55,
                         wrist_regions);
 
+                destroyed_total +=
+                    voxel_character.damage_anatomical_interface(
+                        "hand_l",
+                        {"lowerarm_l"},
+                        0.55);
+
                 auto component =
                     voxel_character
                         .detach_anatomical_region_if_disconnected(
