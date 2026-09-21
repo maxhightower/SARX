@@ -264,7 +264,11 @@ DamageReport DamageSystem::apply_capsule(
         const Vec3 p0 = body.particles()[c.a].position;
         const Vec3 p1 = body.particles()[c.b].position;
         const auto hit = segment_segment_distance(damage.a, damage.b, p0, p1);
-        const auto material = materials_.get(c.material);
+        auto material = materials_.get(c.material);
+        material.fiber_direction = rotate_between(
+            c.rest_direction,
+            p1 - p0,
+            material.fiber_direction);
         const double amount = damage_from_distance(
             hit.distance_squared,
             damage.radius,
@@ -331,7 +335,7 @@ DamageReport DamageSystem::apply_capsule(
         const auto material = materials_.get(bone.joint_material);
         const double amount = damage_from_distance(
             hit.distance_squared,
-            damage.radius,
+            damage.radius + bone.joint_radius,
             damage.energy,
             resistance_for(material, damage.mode, p1 - p0));
 
