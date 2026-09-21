@@ -13,6 +13,10 @@ on:
       - "tools/sarx_character_voxel_thigh_demo.cpp"
       - "src/voxel_character.cpp"
       - "include/sarx/voxel_character.hpp"
+      - "src/motion_viability.cpp"
+      - "include/sarx/motion_viability.hpp"
+      - "src/motion_recovery.cpp"
+      - "include/sarx/motion_recovery.hpp"
       - "src/gltf_character.cpp"
       - "include/sarx/gltf_character.hpp"
       - "src/character_render.cpp"
@@ -40,6 +44,10 @@ on:
       - "tools/sarx_character_voxel_thigh_demo.cpp"
       - "src/voxel_character.cpp"
       - "include/sarx/voxel_character.hpp"
+      - "src/motion_viability.cpp"
+      - "include/sarx/motion_viability.hpp"
+      - "src/motion_recovery.cpp"
+      - "include/sarx/motion_recovery.hpp"
       - "src/gltf_character.cpp"
       - "include/sarx/gltf_character.hpp"
       - "src/character_render.cpp"
@@ -185,7 +193,8 @@ jobs:
             --require-walk-invalidation \
             --require-anatomical-isolation \
             --require-stable-camera \
-            --require-articulated-leg | tee build/character_voxel_thigh.log
+            --require-articulated-leg \
+            --require-fall-transition | tee build/character_voxel_thigh.log
 
       - name: Encode MP4s
         run: |
@@ -253,6 +262,10 @@ jobs:
             -pix_fmt yuv420p \
             -crf 20 \
             build/media/v09_quaternius_voxel_left_thigh_cut.mp4
+
+          cp \
+            build/media/v09_quaternius_voxel_left_thigh_cut.mp4 \
+            build/media/v10_quaternius_walk_failure_to_fall.mp4
 
       - name: Encode GIF previews
         run: |
@@ -352,5 +365,6 @@ jobs:
             build/media/v06_real_character_head_severance.mp4
             build/media/v08_quaternius_voxel_left_hand_detach.mp4
             build/media/v09_quaternius_voxel_left_thigh_cut.mp4
+            build/media/v10_quaternius_walk_failure_to_fall.mp4
             build/media/provenance.txt
           if-no-files-found: error
