@@ -140,18 +140,20 @@ jobs:
             --require-ground-contact \
             --require-rotation | tee build/character_head.log
 
-      - name: Render animated Quaternius voxel damage frames
+      - name: Render Quaternius voxel left-hand detachment frames
         run: |
           ./build/sarx_character_voxel_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
             --clip Walk \
             --output build/character_voxel_frames \
-            --frames 180 \
-            --damage-frame 80 \
+            --frames 210 \
+            --damage-frame 75 \
             --fps 30 \
-            --voxel-size 0.060 \
-            --require-damage | tee build/character_voxel.log
+            --voxel-size 0.045 \
+            --require-damage \
+            --require-detachment \
+            --require-ground-contact | tee build/character_voxel.log
 
       - name: Encode MP4s
         run: |
@@ -210,7 +212,7 @@ jobs:
             -c:v libx264 \
             -pix_fmt yuv420p \
             -crf 20 \
-            build/media/v07_quaternius_voxel_damage.mp4
+            build/media/v08_quaternius_voxel_left_hand_detach.mp4
 
       - name: Encode GIF previews
         run: |
@@ -286,7 +288,7 @@ jobs:
             echo "[real skinned head severance log]"
             cat build/character_head.log
             echo
-            echo "[animated Quaternius voxel damage log]"
+            echo "[Quaternius voxel left-hand detachment log]"
             cat build/character_voxel.log
           } > build/media/provenance.txt
 
@@ -305,6 +307,6 @@ jobs:
             build/media/v05_real_character_walk_severance.gif
             build/media/v06_real_character_left_arm_severance.mp4
             build/media/v06_real_character_head_severance.mp4
-            build/media/v07_quaternius_voxel_damage.mp4
+            build/media/v08_quaternius_voxel_left_hand_detach.mp4
             build/media/provenance.txt
           if-no-files-found: error
