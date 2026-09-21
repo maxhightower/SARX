@@ -8,6 +8,8 @@ add_library(sarx
     src/damage.cpp
     src/broad_phase.cpp
     src/volume.cpp
+    src/adaptive.cpp
+    src/soa.cpp
 )
 
 target_include_directories(sarx
