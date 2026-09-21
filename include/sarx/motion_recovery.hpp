@@ -25,6 +25,7 @@ enum class MotionStrategy {
     Fall,
     Kneel,
     Prone,
+    GetUp,
     Hop,
     Crawl,
     Stop
@@ -56,6 +57,34 @@ struct MotionRecoveryPlan {
     MotionViabilityResult current_viability{};
     std::vector<MotionCandidateScore> candidates;
 };
+
+enum class GroundedPosture {
+    Unknown,
+    Prone,
+    Kneeling,
+    Standing
+};
+
+struct GroundedRecoveryPlan {
+    GroundedPosture current_posture{GroundedPosture::Prone};
+    GroundedPosture target_posture{GroundedPosture::Prone};
+    bool transition_required{false};
+
+    MotionStrategy strategy{MotionStrategy::Prone};
+    std::string motion_id{"HoldProne"};
+    bool procedural{true};
+    double score{};
+
+    std::vector<MotionCandidateScore> candidates;
+    std::vector<MotionCandidateScore> followup_locomotion_options;
+};
+
+[[nodiscard]] GroundedRecoveryPlan plan_grounded_recovery(
+    BehavioralIntent intent,
+    GroundedPosture current_posture,
+    const std::vector<std::string>& available_motions,
+    const std::vector<AnatomicalAvailability>& anatomy,
+    const MotionPhysicalState& physical_state);
 
 [[nodiscard]] MotionRecoveryPlan plan_motion_recovery(
     BehavioralIntent intent,
