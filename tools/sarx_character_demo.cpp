@@ -28,6 +28,7 @@ struct Args {
     double fps{30.0};
     bool list_joints{false};
     bool validate_all_clips{false};
+    int min_mapped_joints{0};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -65,6 +66,11 @@ Args parse_args(int argc, char** argv) {
         } else if (
             value == "--validate-all-clips") {
             args.validate_all_clips = true;
+        } else if (
+            value == "--min-mapped-joints"
+            && i + 1 < argc) {
+            args.min_mapped_joints =
+                std::stoi(argv[++i]);
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_demo"
@@ -75,7 +81,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--frames N]"
                 << " [--fps N]"
                 << " [--list-joints]"
-                << " [--validate-all-clips]\n";
+                << " [--validate-all-clips]"
+                << " [--min-mapped-joints N]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -83,9 +90,11 @@ Args parse_args(int argc, char** argv) {
         }
     }
 
-    if (args.frames <= 0 || args.fps <= 0.0) {
+    if (args.frames <= 0
+        || args.fps <= 0.0
+        || args.min_mapped_joints < 0) {
         throw std::invalid_argument(
-            "frames and fps must be positive");
+            "frames/fps must be positive and min mapped joints non-negative");
     }
 
     return args;
@@ -265,6 +274,38 @@ int main(int argc, char** argv) {
             throw;
         }
 
+        const auto mapped_nodes =
+            character.animation_target_nodes(
+                clip);
+
+        if (args.min_mapped_joints > 0
+            && mapped_nodes.size()
+                < static_cast<std::size_t>(
+                    args.min_mapped_joints)) {
+
+            std::ostringstream message;
+            message
+                << "animation mapped only "
+                << mapped_nodes.size()
+                << " character nodes; required "
+                << args.min_mapped_joints
+                << ". mapped=";
+
+            for (std::size_t i = 0;
+                 i < mapped_nodes.size();
+                 ++i) {
+
+                if (i > 0) {
+                    message << ",";
+                }
+
+                message << mapped_nodes[i];
+            }
+
+            throw std::runtime_error(
+                message.str());
+        }
+
         const auto restish =
             character.sample(
                 clip,
@@ -407,6 +448,7 @@ int main(int argc, char** argv) {
             << " triangles=" << stats.triangles
             << " joints=" << stats.skin_joints
             << " clips=" << stats.animation_clips
+            << " mapped_nodes=" << mapped_nodes.size()
             << " frames=" << args.frames
             << " output=" << args.output.string()
             << '\n';
