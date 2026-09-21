@@ -223,10 +223,12 @@ void test_material_cut_resistance_changes_failure() {
     blade.a = {0.5, -1.0, 0.025};
     blade.b = {0.5, 1.0, 0.025};
     blade.radius = 0.1;
-    blade.energy = 1.2;
+    blade.energy = 1.4;
     blade.mode = DamageMode::Cut;
 
-    damage.apply_capsule(body, blade);
+    const auto report = damage.apply_capsule(body, blade);
+    check(!report.events.empty(),
+          "material response fixture should emit spatial damage events");
 
     check(!body.structural_constraints()[flesh_link].active,
           "same blade should sever low-resistance tissue");
