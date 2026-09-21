@@ -12,11 +12,15 @@ add_library(sarx
     src/soa.cpp
     src/debug_render.cpp
     src/humanoid.cpp
+    src/gltf_character.cpp
+    src/character_render.cpp
 )
 
 target_include_directories(sarx
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
 target_compile_features(sarx PUBLIC cxx_std_20)
@@ -38,6 +42,12 @@ add_executable(sarx_humanoid_demo
 )
 target_link_libraries(sarx_humanoid_demo PRIVATE sarx)
 target_compile_features(sarx_humanoid_demo PRIVATE cxx_std_20)
+
+add_executable(sarx_character_demo
+    tools/sarx_character_demo.cpp
+)
+target_link_libraries(sarx_character_demo PRIVATE sarx)
+target_compile_features(sarx_character_demo PRIVATE cxx_std_20)
 
 if (SARX_BUILD_TESTS)
     enable_testing()
@@ -65,4 +75,21 @@ if (SARX_BUILD_TESTS)
             --frames 5
             --cut-frame 2
     )
+
+    if (
+        EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/character.glb"
+        AND
+        EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/animations.glb"
+    )
+        add_test(
+            NAME sarx_real_character_walk_smoke
+            COMMAND sarx_character_demo
+                --character ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/character.glb
+                --animations ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/animations.glb
+                --clip Walk
+                --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_real_character_frames
+                --frames 3
+                --fps 30
+        )
+    endif()
 endif()
