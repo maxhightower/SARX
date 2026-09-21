@@ -83,10 +83,36 @@ SegmentDistanceResult point_segment_distance(
     return {length_squared(point - closest), point, closest};
 }
 
-double resistance_for(const MaterialResponse& response, DamageMode mode) {
-    return mode == DamageMode::Cut
-        ? response.cut_resistance
-        : response.blunt_resistance;
+double effective_cut_resistance(
+    const MaterialResponse& response,
+    const Vec3& target_direction) {
+
+    const double fiber_len = length(response.fiber_direction);
+    const double target_len = length(target_direction);
+    if (fiber_len <= 1e-12 || target_len <= 1e-12) {
+        return response.cut_resistance;
+    }
+
+    const double alignment = std::abs(dot(
+        response.fiber_direction / fiber_len,
+        target_direction / target_len));
+    const double aligned_weight = alignment * alignment;
+    const double multiplier =
+        response.transverse_cut_multiplier * (1.0 - aligned_weight)
+        + response.longitudinal_cut_multiplier * aligned_weight;
+
+    return response.cut_resistance * multiplier;
+}
+
+double resistance_for(
+    const MaterialResponse& response,
+    DamageMode mode,
+    const Vec3& target_direction) {
+
+    if (mode == DamageMode::Cut) {
+        return effective_cut_resistance(response, target_direction);
+    }
+    return response.blunt_resistance;
 }
 
 double damage_from_distance(
@@ -114,6 +140,8 @@ Vec3 midpoint(const Vec3& a, const Vec3& b) {
 
 void append_event(
     DamageReport& report,
+    DamageEventId event_id,
+    DamageSource source,
     DamageTargetKind kind,
     std::size_t id,
     MaterialId material,
@@ -126,6 +154,8 @@ void append_event(
     }
 
     report.events.push_back(FractureEvent{
+        event_id,
+        source,
         kind,
         id,
         material,
@@ -138,8 +168,14 @@ void append_event(
 } // namespace
 
 void MaterialTable::set(MaterialId material, const MaterialResponse& response) {
-    if (response.cut_resistance <= 0.0 || response.blunt_resistance <= 0.0) {
-        throw std::invalid_argument("material resistances must be positive");
+    if (response.cut_resistance <= 0.0
+        || response.blunt_resistance <= 0.0
+        || response.longitudinal_cut_multiplier <= 0.0
+        || response.transverse_cut_multiplier <= 0.0
+        || response.tensile_yield_strain < 0.0
+        || response.tensile_break_strain < response.tensile_yield_strain
+        || response.strain_damage_rate < 0.0) {
+        throw std::invalid_argument("invalid material response");
     }
     responses_[material] = response;
 }
@@ -156,12 +192,31 @@ std::size_t DamageReport::broken_count() const {
         [](const FractureEvent& e) { return e.broke; }));
 }
 
-DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& damage) const {
-    if (damage.radius <= 0.0 || damage.energy < 0.0) {
+DamageEventId DamageSystem::resolve_event_id(DamageEventId requested) {
+    if (requested == 0) {
+        return next_event_id_++;
+    }
+
+    next_event_id_ = std::max(next_event_id_, requested + 1);
+    return requested;
+}
+
+DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& input) {
+    if (input.radius <= 0.0 || input.energy < 0.0) {
         throw std::invalid_argument("invalid capsule damage");
     }
 
+    CapsuleDamage damage = input;
+    damage.event_id = resolve_event_id(damage.event_id);
+    history_.push_back(DamageCommand{
+        DamageCommandKind::Capsule,
+        damage,
+        {},
+        {}
+    });
+
     DamageReport report;
+    report.event_id = damage.event_id;
 
     const auto structural_snapshot = body.structural_constraints();
     for (ConstraintId id = 0; id < structural_snapshot.size(); ++id) {
@@ -176,7 +231,7 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& damage
             hit.distance_squared,
             damage.radius,
             damage.energy,
-            resistance_for(material, damage.mode));
+            resistance_for(material, damage.mode, p1 - p0));
 
         if (amount <= 0.0) continue;
         const bool was_active = c.active;
@@ -184,6 +239,8 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& damage
         const bool broke = was_active && !body.structural_constraints()[id].active;
         append_event(
             report,
+            damage.event_id,
+            DamageSource::Spatial,
             DamageTargetKind::StructuralConstraint,
             id,
             c.material,
@@ -205,7 +262,7 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& damage
             hit.distance_squared,
             damage.radius,
             damage.energy,
-            resistance_for(material, damage.mode));
+            resistance_for(material, damage.mode, p1 - p0));
 
         if (amount <= 0.0) continue;
         const bool was_active = a.active;
@@ -213,6 +270,8 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& damage
         const bool broke = was_active && !body.attachments()[id].active;
         append_event(
             report,
+            damage.event_id,
+            DamageSource::Spatial,
             DamageTargetKind::AttachmentConstraint,
             id,
             a.material,
@@ -234,7 +293,7 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& damage
             hit.distance_squared,
             damage.radius,
             damage.energy,
-            resistance_for(material, damage.mode));
+            resistance_for(material, damage.mode, p1 - p0));
 
         if (amount <= 0.0) continue;
         const bool was_active = bone.joint_to_parent_active;
@@ -242,6 +301,8 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& damage
         const bool broke = was_active && !body.bones()[id].joint_to_parent_active;
         append_event(
             report,
+            damage.event_id,
+            DamageSource::Spatial,
             DamageTargetKind::BoneJoint,
             id,
             bone.joint_material,
@@ -253,12 +314,22 @@ DamageReport DamageSystem::apply_capsule(Body& body, const CapsuleDamage& damage
     return report;
 }
 
-DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& damage) const {
-    if (damage.radius <= 0.0 || damage.energy < 0.0) {
+DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& input) {
+    if (input.radius <= 0.0 || input.energy < 0.0) {
         throw std::invalid_argument("invalid sphere damage");
     }
 
+    SphereDamage damage = input;
+    damage.event_id = resolve_event_id(damage.event_id);
+    history_.push_back(DamageCommand{
+        DamageCommandKind::Sphere,
+        {},
+        damage,
+        {}
+    });
+
     DamageReport report;
+    report.event_id = damage.event_id;
 
     const auto structural_snapshot = body.structural_constraints();
     for (ConstraintId id = 0; id < structural_snapshot.size(); ++id) {
@@ -273,7 +344,7 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& damage) 
             hit.distance_squared,
             damage.radius,
             damage.energy,
-            resistance_for(material, damage.mode));
+            resistance_for(material, damage.mode, p1 - p0));
 
         if (amount <= 0.0) continue;
         const bool was_active = c.active;
@@ -281,6 +352,8 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& damage) 
         const bool broke = was_active && !body.structural_constraints()[id].active;
         append_event(
             report,
+            damage.event_id,
+            DamageSource::Spatial,
             DamageTargetKind::StructuralConstraint,
             id,
             c.material,
@@ -302,7 +375,7 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& damage) 
             hit.distance_squared,
             damage.radius,
             damage.energy,
-            resistance_for(material, damage.mode));
+            resistance_for(material, damage.mode, p1 - p0));
 
         if (amount <= 0.0) continue;
         const bool was_active = a.active;
@@ -310,6 +383,8 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& damage) 
         const bool broke = was_active && !body.attachments()[id].active;
         append_event(
             report,
+            damage.event_id,
+            DamageSource::Spatial,
             DamageTargetKind::AttachmentConstraint,
             id,
             a.material,
@@ -331,7 +406,7 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& damage) 
             hit.distance_squared,
             damage.radius,
             damage.energy,
-            resistance_for(material, damage.mode));
+            resistance_for(material, damage.mode, p1 - p0));
 
         if (amount <= 0.0) continue;
         const bool was_active = bone.joint_to_parent_active;
@@ -339,6 +414,8 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& damage) 
         const bool broke = was_active && !body.bones()[id].joint_to_parent_active;
         append_event(
             report,
+            damage.event_id,
+            DamageSource::Spatial,
             DamageTargetKind::BoneJoint,
             id,
             bone.joint_material,
@@ -348,6 +425,95 @@ DamageReport DamageSystem::apply_sphere(Body& body, const SphereDamage& damage) 
     }
 
     return report;
+}
+
+DamageReport DamageSystem::apply_strain(Body& body, const StrainDamage& input) {
+    if (input.dt <= 0.0) {
+        throw std::invalid_argument("strain damage dt must be positive");
+    }
+
+    StrainDamage damage = input;
+    damage.event_id = resolve_event_id(damage.event_id);
+    history_.push_back(DamageCommand{
+        DamageCommandKind::Strain,
+        {},
+        {},
+        damage
+    });
+
+    DamageReport report;
+    report.event_id = damage.event_id;
+
+    const auto snapshot = body.structural_constraints();
+    for (ConstraintId id = 0; id < snapshot.size(); ++id) {
+        const auto& c = snapshot[id];
+        if (!c.active || c.rest_length <= 1e-12) continue;
+
+        const Vec3 p0 = body.particles()[c.a].position;
+        const Vec3 p1 = body.particles()[c.b].position;
+        const double current_length = length(p1 - p0);
+        const double tensile_strain =
+            std::max(0.0, current_length / c.rest_length - 1.0);
+
+        const auto material = materials_.get(c.material);
+        double amount = 0.0;
+
+        if (tensile_strain >= material.tensile_break_strain) {
+            amount = std::max(0.0, c.break_damage - c.damage);
+        } else if (tensile_strain > material.tensile_yield_strain
+                   && material.strain_damage_rate > 0.0) {
+            amount = (tensile_strain - material.tensile_yield_strain)
+                * material.strain_damage_rate
+                * damage.dt;
+        }
+
+        if (amount <= 0.0) continue;
+
+        const bool was_active = c.active;
+        body.damage_structural(id, amount);
+        const bool broke = was_active && !body.structural_constraints()[id].active;
+        append_event(
+            report,
+            damage.event_id,
+            DamageSource::Strain,
+            DamageTargetKind::StructuralConstraint,
+            id,
+            c.material,
+            midpoint(p0, p1),
+            amount,
+            broke);
+    }
+
+    return report;
+}
+
+DamageReport DamageSystem::apply(Body& body, const DamageCommand& command) {
+    switch (command.kind) {
+    case DamageCommandKind::Capsule:
+        return apply_capsule(body, command.capsule);
+    case DamageCommandKind::Sphere:
+        return apply_sphere(body, command.sphere);
+    case DamageCommandKind::Strain:
+        return apply_strain(body, command.strain);
+    }
+    throw std::invalid_argument("unknown damage command");
+}
+
+std::vector<DamageReport> DamageSystem::replay(
+    Body& body,
+    const std::vector<DamageCommand>& commands) {
+
+    std::vector<DamageReport> reports;
+    reports.reserve(commands.size());
+    for (const auto& command : commands) {
+        reports.push_back(apply(body, command));
+    }
+    return reports;
+}
+
+void DamageSystem::clear_history() {
+    history_.clear();
+    next_event_id_ = 1;
 }
 
 } // namespace sarx
