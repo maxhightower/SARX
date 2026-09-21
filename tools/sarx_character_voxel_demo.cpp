@@ -1,6 +1,7 @@
 #include "sarx/body.hpp"
 #include "sarx/character_render.hpp"
 #include "sarx/gltf_character.hpp"
+#include "sarx/motion_viability.hpp"
 #include "sarx/voxel_character.hpp"
 
 #include <algorithm>
@@ -31,6 +32,8 @@ struct Args {
     bool require_damage{false};
     bool require_detachment{false};
     bool require_ground_contact{false};
+    bool require_anatomical_isolation{false};
+    bool require_walk_viability{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -61,6 +64,10 @@ Args parse_args(int argc, char** argv) {
             args.require_detachment = true;
         } else if (value == "--require-ground-contact") {
             args.require_ground_contact = true;
+        } else if (value == "--require-anatomical-isolation") {
+            args.require_anatomical_isolation = true;
+        } else if (value == "--require-walk-viability") {
+            args.require_walk_viability = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_voxel_demo"
@@ -74,7 +81,9 @@ Args parse_args(int argc, char** argv) {
                 << " [--voxel-size N]"
                 << " [--require-damage]"
                 << " [--require-detachment]"
-                << " [--require-ground-contact]\n";
+                << " [--require-ground-contact]"
+                << " [--require-anatomical-isolation]"
+                << " [--require-walk-viability]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -569,7 +578,9 @@ int main(int argc, char** argv) {
 
         sarx::VoxelizedCharacter voxel_character;
         voxel_character.build(
-            rest,
+            character,
+            clip,
+            0.0,
             args.voxel_size);
 
         const Bounds bounds =
@@ -620,6 +631,8 @@ int main(int argc, char** argv) {
         std::size_t destroyed_total = 0;
         std::size_t active_after_damage = 0;
         int detached_frame = -1;
+        int walk_invalidated_frame = -1;
+        bool normal_walk_authority = true;
 
         std::optional<DetachedHand>
             detached_hand;
@@ -627,28 +640,52 @@ int main(int argc, char** argv) {
         const double dt =
             1.0 / args.fps;
 
+        double motion_time_seconds = 0.0;
+        int motion_frame = 0;
+
+        const std::vector<std::string>
+            wrist_regions{
+                "hand_l",
+                "lowerarm_l"
+            };
+
         for (int frame = 0;
              frame < args.frames;
              ++frame) {
 
-            const double seconds =
+            const double requested_seconds =
                 static_cast<double>(frame)
                 / args.fps;
 
+            if (normal_walk_authority) {
+                motion_time_seconds =
+                    requested_seconds;
+                motion_frame = frame;
+            }
+
             const sarx::Vec3 world_offset =
-                world_offset_for(frame);
+                world_offset_for(
+                    motion_frame);
 
             const auto animated =
                 character.sample(
                     clip,
-                    seconds,
+                    motion_time_seconds,
+                    true,
+                    world_offset);
+
+            const auto voxel_centers =
+                voxel_character.sample_centers(
+                    character,
+                    clip,
+                    motion_time_seconds,
                     true,
                     world_offset);
 
             const auto hand_split =
                 character.sample_split_branch(
                     clip,
-                    seconds,
+                    motion_time_seconds,
                     "hand_l",
                     true,
                     world_offset);
