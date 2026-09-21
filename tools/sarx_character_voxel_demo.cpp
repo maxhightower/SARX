@@ -708,34 +708,19 @@ int main(int argc, char** argv) {
 
                 destroyed_total +=
                     voxel_character.damage_cut_disk(
-                        animated,
+                        voxel_centers,
                         wrist,
                         hand_axis,
                         args.voxel_size * 0.82,
                         args.voxel_size * 4.00,
-                        0.55);
+                        0.55,
+                        wrist_regions);
 
                 auto component =
                     voxel_character
-                        .detach_component_near(
-                            animated,
-                            animated_hand_center,
+                        .detach_anatomical_region_if_disconnected(
+                            "hand_l",
                             6);
-
-                if (!component
-                    && frame >= args.damage_frame + 1) {
-
-                    component =
-                        voxel_character
-                            .detach_distal_region(
-                                animated,
-                                wrist,
-                                hand_axis,
-                                animated_hand_center,
-                                args.voxel_size * 7.5,
-                                args.voxel_size * 0.15,
-                                6);
-                }
 
                 if (component) {
                     DetachedHand hand;
@@ -748,24 +733,25 @@ int main(int argc, char** argv) {
                             .size());
 
                     std::vector<sarx::Vec3>
-                        previous_centers;
+                        previous_component_centers;
 
-                    previous_centers.reserve(
+                    previous_component_centers.reserve(
                         hand.component
                             .voxel_indices
                             .size());
 
-                    const auto previous_animated =
-                        character.sample(
+                    const auto previous_voxel_centers =
+                        voxel_character.sample_centers(
+                            character,
                             clip,
                             std::max(
                                 0.0,
-                                seconds - dt),
+                                motion_time_seconds - dt),
                             true,
                             world_offset_for(
                                 std::max(
                                     0,
-                                    frame - 1)));
+                                    motion_frame - 1)));
 
                     for (const std::size_t index
                          : hand.component
@@ -775,13 +761,13 @@ int main(int argc, char** argv) {
                             voxel_character
                                 .voxel_center(
                                     index,
-                                    animated));
+                                    voxel_centers));
 
-                        previous_centers.push_back(
+                        previous_component_centers.push_back(
                             voxel_character
                                 .voxel_center(
                                     index,
-                                    previous_animated));
+                                    previous_voxel_centers));
                     }
 
                     const auto [a_index, b_index] =
@@ -807,14 +793,14 @@ int main(int argc, char** argv) {
                         .particles()[hand.particle_a]
                         .velocity =
                             (hand.rest_a
-                             - previous_centers[a_index])
+                             - previous_component_centers[a_index])
                             / dt;
 
                     hand.motion
                         .particles()[hand.particle_b]
                         .velocity =
                             (hand.rest_b
-                             - previous_centers[b_index])
+                             - previous_component_centers[b_index])
                             / dt;
 
                     hand.motion.add_structural_constraint(
@@ -837,9 +823,21 @@ int main(int argc, char** argv) {
                     args.voxel_size);
             }
 
+            const auto motion_viability =
+                sarx::evaluate_motion_viability(
+                    character.animation_names()[clip],
+                    voxel_character.anatomy_availability());
+
+            if (motion_viability.state
+                    == sarx::MotionViability::Invalid
+                && normal_walk_authority) {
+                normal_walk_authority = false;
+                walk_invalidated_frame = frame;
+            }
+
             sarx::CharacterMeshFrame visible =
                 voxel_character.render(
-                    animated);
+                    voxel_centers);
 
             std::vector<sarx::Vec3>
                 detached_centers;
