@@ -185,7 +185,11 @@ void DamageBroadPhase::rebuild(const Body& body, double cell_size) {
         if (bone.parent == kNoParent || !bone.joint_to_parent_active) continue;
         const Vec3 p0 = body.bones()[bone.parent].animated_position;
         const Vec3 p1 = bone.animated_position;
-        impl_->insert_aabb(min_vec(p0, p1), max_vec(p0, p1), Entry{IndexedKind::BoneJoint, id});
+        const Vec3 r{bone.joint_radius, bone.joint_radius, bone.joint_radius};
+        impl_->insert_aabb(
+            min_vec(p0, p1) - r,
+            max_vec(p0, p1) + r,
+            Entry{IndexedKind::BoneJoint, id});
         ++impl_->indexed_primitives;
     }
 }
