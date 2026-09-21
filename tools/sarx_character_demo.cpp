@@ -342,12 +342,15 @@ int main(int argc, char** argv) {
             center.z
         };
 
+        // Keep travel aligned with the Quaternius +Z facing axis,
+        // but use a three-quarter corner view so depth and limb motion
+        // remain visually inspectable.
         camera.position =
             camera.target
             + sarx::Vec3{
-                scale * 2.2,
+                scale * 2.25,
                 scale * 0.45,
-                scale * 4.8
+                scale * 4.9
             };
 
         camera.vertical_fov_degrees = 34.0;
@@ -369,7 +372,7 @@ int main(int argc, char** argv) {
                         args.frames - 1)
                 : 0.0;
 
-            const double x =
+            const double z =
                 -travel * 0.5
                 + travel * progress;
 
@@ -378,7 +381,7 @@ int main(int argc, char** argv) {
                     clip,
                     seconds,
                     true,
-                    {x, 0.0, 0.0});
+                    {0.0, 0.0, z});
 
             sarx::write_character_ppm(
                 frame_path(

@@ -28,6 +28,13 @@ on:
     paths:
       - "tools/sarx_severance_demo.cpp"
       - "tools/sarx_humanoid_demo.cpp"
+      - "tools/sarx_character_demo.cpp"
+      - "tools/sarx_character_severance_demo.cpp"
+      - "src/gltf_character.cpp"
+      - "include/sarx/gltf_character.hpp"
+      - "src/character_render.cpp"
+      - "include/sarx/character_render.hpp"
+      - "assets/quaternius/**"
       - "src/humanoid.cpp"
       - "include/sarx/humanoid.hpp"
       - "src/debug_render.cpp"
@@ -92,7 +99,9 @@ jobs:
             --output build/character_severance_frames \
             --frames 210 \
             --cut-frame 90 \
-            --fps 30 | tee build/character_severance.log
+            --fps 30 \
+            --require-ground-contact \
+            --require-articulated-limb | tee build/character_severance.log
 
       - name: Encode MP4s
         run: |
