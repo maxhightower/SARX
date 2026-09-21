@@ -77,3 +77,9 @@ Quaternius skeleton height, smooths the horizontal path over a short window,
 and exports cumulative path length plus vertical displacement as a
 `.root.csv` sidecar. Runtime applies a short post-severance deceleration
 before authored root travel begins.
+
+
+The converter also removes the initial CMU capture calibration pose. For the
+currently integrated injury clips the detector trims exactly one source frame,
+so the authored handoff begins at the first non-calibration pose without
+discarding meaningful gait startup.
