@@ -71,6 +71,7 @@ jobs:
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
             --clip Walk \
+            --list-joints \
             --output build/character_frames \
             --frames 180 \
             --fps 30 | tee build/character.log
