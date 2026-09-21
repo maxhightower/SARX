@@ -1188,4 +1188,219 @@ CharacterMeshFrame GltfCharacter::sample(
     return frame;
 }
 
+CharacterSplitFrame GltfCharacter::sample_split_branch(
+    std::size_t animation,
+    double time_seconds,
+    const std::string& detached_root_joint_fragment,
+    bool loop,
+    const Vec3& world_offset) const {
+
+    if (detached_root_joint_fragment.empty()) {
+        throw std::invalid_argument(
+            "detached root joint fragment must not be empty");
+    }
+
+    const std::string needle =
+        lower_copy(detached_root_joint_fragment);
+
+    int root_node = -1;
+
+    for (std::size_t i = 0;
+         i < impl_->rest_nodes.size();
+         ++i) {
+
+        const std::string name =
+            lower_copy(impl_->rest_nodes[i].name);
+
+        if (name == needle) {
+            root_node = static_cast<int>(i);
+            break;
+        }
+    }
+
+    if (root_node < 0) {
+        std::vector<int> matches;
+
+        for (std::size_t i = 0;
+             i < impl_->rest_nodes.size();
+             ++i) {
+
+            if (lower_copy(
+                    impl_->rest_nodes[i].name)
+                    .find(needle)
+                != std::string::npos) {
+                matches.push_back(
+                    static_cast<int>(i));
+            }
+        }
+
+        if (matches.size() != 1) {
+            throw std::out_of_range(
+                matches.empty()
+                ? "detached root joint not found: "
+                    + detached_root_joint_fragment
+                : "detached root joint fragment is ambiguous: "
+                    + detached_root_joint_fragment);
+        }
+
+        root_node = matches.front();
+    }
+
+    std::vector<std::uint8_t> branch_node(
+        impl_->rest_nodes.size(),
+        0u);
+
+    for (std::size_t i = 0;
+         i < impl_->rest_nodes.size();
+         ++i) {
+
+        int current = static_cast<int>(i);
+        std::size_t guard = 0;
+
+        while (current >= 0) {
+            if (++guard
+                > impl_->rest_nodes.size()) {
+                throw std::runtime_error(
+                    "cycle in character node hierarchy");
+            }
+
+            if (current == root_node) {
+                branch_node[i] = 1u;
+                break;
+            }
+
+            current =
+                impl_->rest_nodes[current].parent;
+        }
+    }
+
+    CharacterMeshFrame full =
+        sample(
+            animation,
+            time_seconds,
+            loop,
+            world_offset);
+
+    std::vector<std::uint8_t> detached_vertex(
+        full.positions.size(),
+        0u);
+
+    std::size_t vertex_base = 0;
+
+    for (const MeshPart& part : impl_->parts) {
+        const bool has_skin =
+            part.skin >= 0
+            && static_cast<std::size_t>(part.skin)
+                < impl_->skins.size();
+
+        for (std::size_t local = 0;
+             local < part.vertices.size();
+             ++local) {
+
+            const VertexData& vertex =
+                part.vertices[local];
+
+            double branch_weight = 0.0;
+
+            if (has_skin && vertex.skinned) {
+                const SkinData& skin =
+                    impl_->skins[part.skin];
+
+                for (int influence = 0;
+                     influence < 4;
+                     ++influence) {
+
+                    const double weight =
+                        vertex.weights[influence];
+
+                    if (weight <= 1e-12) {
+                        continue;
+                    }
+
+                    const std::size_t joint_slot =
+                        vertex.joints[influence];
+
+                    if (joint_slot
+                        >= skin.joints.size()) {
+                        continue;
+                    }
+
+                    const int node =
+                        skin.joints[joint_slot];
+
+                    if (node >= 0
+                        && static_cast<std::size_t>(node)
+                            < branch_node.size()
+                        && branch_node[node]) {
+                        branch_weight += weight;
+                    }
+                }
+            }
+
+            if (branch_weight >= 0.5) {
+                detached_vertex[
+                    vertex_base + local] = 1u;
+            }
+        }
+
+        vertex_base += part.vertices.size();
+    }
+
+    if (vertex_base != full.positions.size()) {
+        throw std::logic_error(
+            "skin partition vertex count does not match sampled mesh");
+    }
+
+    CharacterSplitFrame result;
+    result.body.positions = full.positions;
+    result.detached.positions = full.positions;
+
+    result.body.indices.reserve(
+        full.indices.size());
+    result.detached.indices.reserve(
+        full.indices.size() / 4);
+
+    for (std::size_t tri = 0;
+         tri + 2 < full.indices.size();
+         tri += 3) {
+
+        const std::uint32_t i0 =
+            full.indices[tri + 0];
+        const std::uint32_t i1 =
+            full.indices[tri + 1];
+        const std::uint32_t i2 =
+            full.indices[tri + 2];
+
+        if (i0 >= detached_vertex.size()
+            || i1 >= detached_vertex.size()
+            || i2 >= detached_vertex.size()) {
+            continue;
+        }
+
+        const int count =
+            static_cast<int>(detached_vertex[i0])
+            + static_cast<int>(detached_vertex[i1])
+            + static_cast<int>(detached_vertex[i2]);
+
+        if (count == 3) {
+            result.detached.indices.insert(
+                result.detached.indices.end(),
+                {i0, i1, i2});
+        } else if (count == 0) {
+            result.body.indices.insert(
+                result.body.indices.end(),
+                {i0, i1, i2});
+        } else {
+            ++result.boundary_triangles_removed;
+        }
+    }
+
+    if (result.detached.indices.empty()) {
+        throw std::runtime_error(
+            "selected joint branch owns no complete mesh triangles");
+    }
+
+    return result;
+}
+
 } // namespace sarx
