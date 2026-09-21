@@ -480,8 +480,7 @@ MotionRecoveryPlan plan_authored_injury_locomotion(
 
     static constexpr PreferredMotion preferred[] = {
         {"HurtLegWalk", 0.96, 0.90},
-        {"Limp", 0.94, 0.88},
-        {"DragBadLegWalk", 0.90, 0.82}
+        {"Limp", 0.94, 0.88}
     };
 
     for (const auto& preference : preferred) {
