@@ -1346,7 +1346,7 @@ int main(int argc, char** argv) {
                             stump_this_frame);
 
                     if (stump_this_frame
-                        <= args.voxel_size * 2.5) {
+                        <= args.voxel_size * 1.25) {
                         ++stump_near_ground_frames;
                     }
                 }
@@ -1592,7 +1592,7 @@ int main(int argc, char** argv) {
 
         if (args.require_limp
             && max_right_leg_cycle
-                < args.voxel_size * 0.75) {
+                < 0.15) {
             throw std::runtime_error(
                 "authored injury locomotion has insufficient intact-leg cycling: "
                 + std::to_string(
