@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <limits>
+#include <iterator>
 #include <string>
 
 namespace sarx {
