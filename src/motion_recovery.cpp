@@ -94,6 +94,13 @@ MotionCandidateScore score_grounded_candidate(
             : 0.72;
         break;
 
+    case MotionStrategy::Limp:
+        candidate.intent_preservation =
+            intent == BehavioralIntent::MoveForward
+            ? 0.98
+            : 0.55;
+        break;
+
     case MotionStrategy::Crawl:
         candidate.intent_preservation =
             intent == BehavioralIntent::MoveForward
@@ -436,6 +443,99 @@ GroundedRecoveryPlan plan_grounded_recovery(
     return plan;
 }
 
+MotionRecoveryPlan plan_authored_injury_locomotion(
+    BehavioralIntent intent,
+    const std::string& current_motion,
+    const std::vector<std::string>& available_motions,
+    const std::vector<AnatomicalAvailability>& anatomy,
+    const MotionPhysicalState& physical_state) {
+
+    MotionRecoveryPlan plan;
+    plan.motion_id = current_motion;
+
+    MotionPhysicalContext context;
+    context.has_support_contacts = true;
+    context.support_contacts = physical_state.support_contacts;
+    context.has_grounded_state = true;
+    context.grounded = physical_state.grounded;
+
+    plan.current_viability =
+        evaluate_motion_viability(
+            current_motion,
+            anatomy,
+            context);
+
+    if (plan.current_viability.state
+        != MotionViability::Invalid) {
+        return plan;
+    }
+
+    plan.transition_required = true;
+
+    struct PreferredMotion {
+        const char* fragment;
+        double physical_feasibility;
+        double transition_continuity;
+    };
+
+    static constexpr PreferredMotion preferred[] = {
+        {"HurtLegWalk", 0.96, 0.90},
+        {"Limp", 0.94, 0.88},
+        {"DragBadLegWalk", 0.90, 0.82}
+    };
+
+    for (const auto& preference : preferred) {
+        const std::string* motion =
+            find_motion(
+                available_motions,
+                {preference.fragment});
+
+        if (!motion) {
+            continue;
+        }
+
+        if (!viability_allows(
+                *motion,
+                anatomy,
+                physical_state)) {
+            continue;
+        }
+
+        plan.candidates.push_back(
+            score_grounded_candidate(
+                MotionStrategy::Limp,
+                *motion,
+                false,
+                intent,
+                preference.physical_feasibility,
+                preference.transition_continuity));
+    }
+
+    const auto best =
+        std::max_element(
+            plan.candidates.begin(),
+            plan.candidates.end(),
+            [](const MotionCandidateScore& a,
+               const MotionCandidateScore& b) {
+                return a.total < b.total;
+            });
+
+    if (best == plan.candidates.end()) {
+        plan.strategy = MotionStrategy::Stop;
+        plan.motion_id = current_motion;
+        plan.procedural = false;
+        plan.score = 0.0;
+        return plan;
+    }
+
+    plan.strategy = best->strategy;
+    plan.motion_id = best->motion_id;
+    plan.procedural = false;
+    plan.score = best->total;
+
+    return plan;
+}
+
 const char* motion_strategy_name(
     MotionStrategy strategy) {
 
@@ -450,6 +550,8 @@ const char* motion_strategy_name(
         return "Prone";
     case MotionStrategy::GetUp:
         return "GetUp";
+    case MotionStrategy::Limp:
+        return "Limp";
     case MotionStrategy::Hop:
         return "Hop";
     case MotionStrategy::Crawl:
