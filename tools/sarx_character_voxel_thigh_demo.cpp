@@ -34,6 +34,7 @@ struct Args {
     bool require_ground_contact{false};
     bool require_walk_invalidation{false};
     bool require_anatomical_isolation{false};
+    bool require_stable_camera{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -68,6 +69,8 @@ Args parse_args(int argc, char** argv) {
             args.require_walk_invalidation = true;
         } else if (value == "--require-anatomical-isolation") {
             args.require_anatomical_isolation = true;
+        } else if (value == "--require-stable-camera") {
+            args.require_stable_camera = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_voxel_thigh_demo"
@@ -83,7 +86,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--require-detachment]"
                 << " [--require-ground-contact]"
                 << " [--require-walk-invalidation]"
-                << " [--require-anatomical-isolation]\n";
+                << " [--require-anatomical-isolation]"
+                << " [--require-stable-camera]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -641,6 +645,11 @@ int main(int argc, char** argv) {
         std::optional<DetachedLeg>
             detached_leg;
 
+        sarx::Vec3 previous_camera_target{};
+        sarx::Vec3 previous_camera_world_offset{};
+        bool have_previous_camera = false;
+        double max_camera_tracking_error = 0.0;
+
         for (int frame = 0;
              frame < args.frames;
              ++frame) {
@@ -898,6 +907,31 @@ int main(int argc, char** argv) {
             camera.width = 960;
             camera.height = 720;
 
+            if (have_previous_camera) {
+                const sarx::Vec3 camera_delta =
+                    camera.target
+                    - previous_camera_target;
+
+                const sarx::Vec3 world_delta =
+                    world_offset
+                    - previous_camera_world_offset;
+
+                max_camera_tracking_error =
+                    std::max(
+                        max_camera_tracking_error,
+                        sarx::length(
+                            camera_delta
+                            - world_delta));
+            }
+
+            previous_camera_target =
+                camera.target;
+
+            previous_camera_world_offset =
+                world_offset;
+
+            have_previous_camera = true;
+
             sarx::write_character_ppm(
                 frame_path(
                     args.output,
@@ -967,6 +1001,14 @@ int main(int argc, char** argv) {
                     unrelated_changed_voxels));
         }
 
+        if (args.require_stable_camera
+            && max_camera_tracking_error > 1e-9) {
+            throw std::runtime_error(
+                "thigh evidence camera inherited non-locomotion motion: "
+                + std::to_string(
+                    max_camera_tracking_error));
+        }
+
         std::cout
             << "SARX Quaternius voxel thigh cut demo complete:"
             << " total_voxels="
@@ -1004,6 +1046,8 @@ int main(int argc, char** argv) {
                 ? detached_leg
                     ->max_rotation_radians
                 : 0.0)
+            << " max_camera_tracking_error="
+            << max_camera_tracking_error
             << " voxel_size="
             << stats.voxel_size
             << " frames="
