@@ -7,11 +7,32 @@
 
 namespace sarx {
 
+enum class RegionShape {
+    Box,
+    Sphere,
+    Capsule
+};
+
 struct MaterialRegion {
+    RegionShape shape{RegionShape::Box};
+
+    // Box representation.
     Vec3 min{};
     Vec3 max{};
+
+    // Sphere representation.
+    Vec3 center{};
+    double radius{0.0};
+
+    // Capsule representation.
+    Vec3 a{};
+    Vec3 b{};
+
     MaterialId material{kDefaultMaterial};
     int priority{0};
+
+    // Optional rest-space anatomical fiber direction.
+    Vec3 fiber_direction{};
 };
 
 struct VoxelLatticeSpec {
@@ -45,6 +66,7 @@ public:
     double spacing{};
 
     std::vector<MaterialId> particle_materials;
+    std::vector<Vec3> particle_fibers;
 
     [[nodiscard]] ParticleId particle(
         std::size_t x,
