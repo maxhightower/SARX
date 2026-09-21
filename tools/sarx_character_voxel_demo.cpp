@@ -685,6 +685,21 @@ int main(int argc, char** argv) {
                             animated_hand_center,
                             6);
 
+                if (!component
+                    && frame >= args.damage_frame + 1) {
+
+                    component =
+                        voxel_character
+                            .detach_distal_region(
+                                animated,
+                                wrist,
+                                hand_axis,
+                                animated_hand_center,
+                                args.voxel_size * 7.5,
+                                args.voxel_size * 0.15,
+                                6);
+                }
+
                 if (component) {
                     DetachedHand hand;
                     hand.component =
