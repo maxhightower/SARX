@@ -608,7 +608,7 @@ int main(int argc, char** argv) {
 
                     const auto previous_centers =
                         voxel_character.sample_centers(
-                            character,
+                            walk_character,
                             clip,
                             std::max(
                                 0.0,
