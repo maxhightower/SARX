@@ -266,6 +266,170 @@ void test_sphere_damage_is_spatially_local() {
           "localized impact should report only the nearby break in this fixture");
 }
 
+
+void test_anisotropic_cut_response() {
+    Body body;
+    DamageSystem damage;
+
+    constexpr sarx::MaterialId fiber = 7;
+    MaterialResponse response;
+    response.cut_resistance = 1.0;
+    response.blunt_resistance = 1.0;
+    response.fiber_direction = {1.0, 0.0, 0.0};
+    response.longitudinal_cut_multiplier = 2.0;
+    response.transverse_cut_multiplier = 0.5;
+    damage.materials().set(fiber, response);
+
+    const auto x0 = body.add_particle({-1.0, 0.0, 0.0});
+    const auto x1 = body.add_particle({1.0, 0.0, 0.0});
+    const auto y0 = body.add_particle({0.0, -1.0, 0.0});
+    const auto y1 = body.add_particle({0.0, 1.0, 0.0});
+
+    const auto along =
+        body.add_structural_constraint(x0, x1, 0.0, 1.0, fiber);
+    const auto across =
+        body.add_structural_constraint(y0, y1, 0.0, 1.0, fiber);
+
+    CapsuleDamage blade;
+    blade.a = {0.0, 0.0, -1.0};
+    blade.b = {0.0, 0.0, 1.0};
+    blade.radius = 0.1;
+    blade.energy = 0.8;
+    blade.mode = DamageMode::Cut;
+
+    const auto report = damage.apply_capsule(body, blade);
+    check(report.events.size() == 2,
+          "anisotropy fixture should touch both crossing constraints");
+    check(body.structural_constraints()[along].active,
+          "cut along strong fibers should remain sub-threshold");
+    check(!body.structural_constraints()[across].active,
+          "same cut across weak fiber direction should fail");
+}
+
+void test_strain_driven_brittle_fracture() {
+    Body body;
+    DamageSystem damage;
+
+    constexpr sarx::MaterialId brittle = 8;
+    MaterialResponse response;
+    response.tensile_yield_strain = 0.10;
+    response.tensile_break_strain = 0.25;
+    response.strain_damage_rate = 1.0;
+    damage.materials().set(brittle, response);
+
+    const auto p0 = body.add_particle({0.0, 0.0, 0.0});
+    const auto p1 = body.add_particle({1.0, 0.0, 0.0});
+    const auto link =
+        body.add_structural_constraint(p0, p1, 0.0, 1.0, brittle);
+
+    body.particles()[p1].position = {1.30, 0.0, 0.0};
+
+    sarx::StrainDamage strain;
+    strain.dt = 1.0 / 60.0;
+    const auto report = damage.apply_strain(body, strain);
+
+    check(!body.structural_constraints()[link].active,
+          "strain above brittle break threshold should fracture immediately");
+    check(report.broken_count() == 1,
+          "brittle strain fracture should be represented in the event stream");
+    check(!report.events.empty()
+              && report.events[0].source == sarx::DamageSource::Strain,
+          "strain fracture should identify its non-spatial source");
+}
+
+void test_progressive_strain_damage() {
+    Body body;
+    DamageSystem damage;
+
+    constexpr sarx::MaterialId tissue = 9;
+    MaterialResponse response;
+    response.tensile_yield_strain = 0.10;
+    response.tensile_break_strain = 1.0;
+    response.strain_damage_rate = 1.0;
+    damage.materials().set(tissue, response);
+
+    const auto p0 = body.add_particle({0.0, 0.0, 0.0});
+    const auto p1 = body.add_particle({1.0, 0.0, 0.0});
+    const auto link =
+        body.add_structural_constraint(p0, p1, 0.0, 1.0, tissue);
+
+    body.particles()[p1].position = {1.30, 0.0, 0.0};
+
+    sarx::StrainDamage strain;
+    strain.dt = 1.0;
+
+    for (int i = 0; i < 4; ++i) {
+        const auto report = damage.apply_strain(body, strain);
+        check(report.broken_count() == 0,
+              "subcritical overstrain should accumulate before terminal tearing");
+    }
+
+    check(body.structural_constraints()[link].active,
+          "progressive tissue should still be intact before accumulated threshold");
+
+    const auto terminal = damage.apply_strain(body, strain);
+    check(!body.structural_constraints()[link].active,
+          "repeated overstrain should eventually tear progressive tissue");
+    check(terminal.broken_count() == 1,
+          "terminal progressive tear should be emitted exactly once");
+}
+
+void test_damage_history_replays_deterministically() {
+    Body original;
+    DamageSystem author;
+
+    constexpr sarx::MaterialId tissue = 10;
+    author.materials().set(tissue, MaterialResponse{1.0, 1.0});
+
+    const auto a0 = original.add_particle({0.0, 0.0, 0.0});
+    const auto a1 = original.add_particle({1.0, 0.0, 0.0});
+    const auto b0 = original.add_particle({2.0, 0.0, 0.0});
+    const auto b1 = original.add_particle({3.0, 0.0, 0.0});
+    original.add_structural_constraint(a0, a1, 0.0, 1.0, tissue);
+    original.add_structural_constraint(b0, b1, 0.0, 1.0, tissue);
+
+    Body replayed = original;
+
+    CapsuleDamage cut;
+    cut.a = {0.5, -1.0, 0.0};
+    cut.b = {0.5, 1.0, 0.0};
+    cut.radius = 0.1;
+    cut.energy = 0.6;
+    cut.event_id = 100;
+
+    SphereDamage impact;
+    impact.center = {2.5, 0.0, 0.0};
+    impact.radius = 0.2;
+    impact.energy = 1.2;
+    impact.event_id = 101;
+
+    const auto first = author.apply_capsule(original, cut);
+    const auto second = author.apply_sphere(original, impact);
+
+    check(first.event_id == 100 && second.event_id == 101,
+          "caller-supplied damage IDs should remain authoritative");
+    check(author.history().size() == 2,
+          "authoritative damage operations should be recorded as replay commands");
+
+    DamageSystem replica;
+    replica.materials().set(tissue, MaterialResponse{1.0, 1.0});
+    const auto reports = replica.replay(replayed, author.history());
+
+    check(reports.size() == 2
+              && reports[0].event_id == 100
+              && reports[1].event_id == 101,
+          "replay should preserve event ordering and IDs");
+
+    for (std::size_t i = 0; i < original.structural_constraints().size(); ++i) {
+        const auto& lhs = original.structural_constraints()[i];
+        const auto& rhs = replayed.structural_constraints()[i];
+        check(lhs.active == rhs.active,
+              "replay should reproduce structural topology");
+        check(std::abs(lhs.damage - rhs.damage) < 1e-12,
+              "replay should reproduce accumulated damage");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -276,12 +440,16 @@ int main() {
     test_blade_sweep_automatically_severs_shoulder();
     test_material_cut_resistance_changes_failure();
     test_sphere_damage_is_spatially_local();
+    test_anisotropic_cut_response();
+    test_strain_driven_brittle_fracture();
+    test_progressive_strain_damage();
+    test_damage_history_replays_deterministically();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
         return EXIT_FAILURE;
     }
 
-    std::cout << "SARX V0.2 tests passed.\n";
+    std::cout << "SARX V0.3 core tests passed.\n";
     return EXIT_SUCCESS;
 }
