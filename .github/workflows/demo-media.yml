@@ -41,7 +41,7 @@ jobs:
           ./build/sarx_severance_demo \
             --output build/demo_frames \
             --frames 120 \
-            --cut-frame 45
+            --cut-frame 45 | tee build/demo.log
 
       - name: Encode MP4
         run: |
@@ -75,6 +75,10 @@ jobs:
             echo "fps=30"
             echo "cut_frame=45"
             echo "backend=CPU Body"
+            echo "scheduler=full pre-cut; adaptive wound-domain + free-island closure post-cut"
+            echo
+            echo "[demo log]"
+            cat build/demo.log
           } > build/media/provenance.txt
 
       - name: Upload prototype media
