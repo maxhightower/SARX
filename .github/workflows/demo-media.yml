@@ -1,0 +1,82 @@
+name: Render SARX demo media
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "research/**"
+    paths:
+      - "tools/sarx_severance_demo.cpp"
+      - "src/debug_render.cpp"
+      - "include/sarx/debug_render.hpp"
+      - ".github/workflows/demo-media.yml"
+
+jobs:
+  render-demo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Configure
+        run: cmake -S . -B build -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build demo
+        run: cmake --build build --config Release --target sarx_severance_demo
+
+      - name: Render frames
+        run: |
+          ./build/sarx_severance_demo \
+            --output build/demo_frames \
+            --frames 120 \
+            --cut-frame 45
+
+      - name: Encode MP4
+        run: |
+          mkdir -p build/media
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/demo_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v04c_arm_severance.mp4
+
+      - name: Encode GIF preview
+        run: |
+          ffmpeg -y \
+            -i build/media/v04c_arm_severance.mp4 \
+            -vf "fps=15,scale=720:-1:flags=lanczos,palettegen" \
+            build/media/palette.png
+
+          ffmpeg -y \
+            -i build/media/v04c_arm_severance.mp4 \
+            -i build/media/palette.png \
+            -lavfi "fps=15,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse" \
+            build/media/v04c_arm_severance.gif
+
+      - name: Record provenance
+        run: |
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "frames=120"
+            echo "fps=30"
+            echo "cut_frame=45"
+            echo "backend=CPU Body"
+          } > build/media/provenance.txt
+
+      - name: Upload prototype media
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarx-v04c-arm-severance-media
+          path: |
+            build/media/v04c_arm_severance.mp4
+            build/media/v04c_arm_severance.gif
+            build/media/provenance.txt
+          if-no-files-found: error
