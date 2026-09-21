@@ -27,6 +27,7 @@ struct Args {
     int frames{180};
     double fps{30.0};
     bool list_joints{false};
+    bool validate_all_clips{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -61,6 +62,9 @@ Args parse_args(int argc, char** argv) {
         } else if (
             value == "--list-joints") {
             args.list_joints = true;
+        } else if (
+            value == "--validate-all-clips") {
+            args.validate_all_clips = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_demo"
@@ -70,7 +74,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--output DIR]"
                 << " [--frames N]"
                 << " [--fps N]"
-                << " [--list-joints]\n";
+                << " [--list-joints]"
+                << " [--validate-all-clips]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -167,6 +172,78 @@ int main(int argc, char** argv) {
                     << joint.rest_world_position.z
                     << ")\n";
             }
+        }
+
+        if (args.validate_all_clips) {
+            const auto& names =
+                character.animation_names();
+
+            if (names.empty()) {
+                throw std::runtime_error(
+                    "character has no mapped animation clips");
+            }
+
+            const std::size_t expected_vertices =
+                character.stats().vertices;
+
+            std::size_t sampled_frames = 0;
+
+            for (std::size_t animation = 0;
+                 animation < names.size();
+                 ++animation) {
+
+                const double duration =
+                    character.animation_duration(animation);
+
+                const double sample_times[] = {
+                    0.0,
+                    duration * 0.25,
+                    duration * 0.50,
+                    duration * 0.75
+                };
+
+                for (const double sample_time
+                     : sample_times) {
+                    const auto frame =
+                        character.sample(
+                            animation,
+                            sample_time,
+                            true);
+
+                    if (frame.positions.size()
+                        != expected_vertices) {
+                        throw std::runtime_error(
+                            "animation changed skinned vertex count: "
+                            + names[animation]);
+                    }
+
+                    if (frame.indices.empty()) {
+                        throw std::runtime_error(
+                            "animation produced no triangles: "
+                            + names[animation]);
+                    }
+
+                    for (const auto& position
+                         : frame.positions) {
+                        if (!std::isfinite(position.x)
+                            || !std::isfinite(position.y)
+                            || !std::isfinite(position.z)) {
+                            throw std::runtime_error(
+                                "animation produced non-finite skinned position: "
+                                + names[animation]);
+                        }
+                    }
+
+                    ++sampled_frames;
+                }
+            }
+
+            std::cout
+                << "SARX animation library validation:"
+                << " clips=" << names.size()
+                << " sampled_frames=" << sampled_frames
+                << " vertices=" << expected_vertices
+                << "\n";
         }
 
         std::size_t clip = 0;
