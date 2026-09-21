@@ -52,6 +52,7 @@ public:
     // Re-evaluate all stored wound domains after large body deformation.
     void refit(const Body& body);
 
+    [[nodiscard]] AdaptiveDamageDomain combined_damage_domain() const;
     [[nodiscard]] SolverDomain combined_solver_domain() const;
     [[nodiscard]] std::size_t active_wound_count() const {
         return entries_.size();
