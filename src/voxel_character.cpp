@@ -721,52 +721,56 @@ VoxelizedCharacter::detach_component_near(
             const CharacterVoxel& voxel =
                 voxels_[current];
 
-            for (int dz = -1; dz <= 1; ++dz) {
-                for (int dy = -1; dy <= 1; ++dy) {
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        if (dx == 0
-                            && dy == 0
-                            && dz == 0) {
-                            continue;
-                        }
+            constexpr int directions[6][3] = {
+                { 1,  0,  0},
+                {-1,  0,  0},
+                { 0,  1,  0},
+                { 0, -1,  0},
+                { 0,  0,  1},
+                { 0,  0, -1}
+            };
 
-                        const int nx =
-                            voxel.grid_x + dx;
-                        const int ny =
-                            voxel.grid_y + dy;
-                        const int nz =
-                            voxel.grid_z + dz;
+            for (const auto& direction
+                 : directions) {
 
-                        if (nx < 0
-                            || ny < 0
-                            || nz < 0) {
-                            continue;
-                        }
+                const int nx =
+                    voxel.grid_x
+                    + direction[0];
+                const int ny =
+                    voxel.grid_y
+                    + direction[1];
+                const int nz =
+                    voxel.grid_z
+                    + direction[2];
 
-                        const auto it =
-                            grid.find(
-                                voxel_key(
-                                    nx,
-                                    ny,
-                                    nz));
-
-                        if (it == grid.end()) {
-                            continue;
-                        }
-
-                        const std::size_t neighbor =
-                            it->second;
-
-                        if (component_of[neighbor]
-                            >= 0) {
-                            continue;
-                        }
-
-                        component_of[neighbor] =
-                            component_id;
-                        queue.push_back(neighbor);
-                    }
+                if (nx < 0
+                    || ny < 0
+                    || nz < 0) {
+                    continue;
                 }
+
+                const auto it =
+                    grid.find(
+                        voxel_key(
+                            nx,
+                            ny,
+                            nz));
+
+                if (it == grid.end()) {
+                    continue;
+                }
+
+                const std::size_t neighbor =
+                    it->second;
+
+                if (component_of[neighbor]
+                    >= 0) {
+                    continue;
+                }
+
+                component_of[neighbor] =
+                    component_id;
+                queue.push_back(neighbor);
             }
         }
     }
