@@ -264,9 +264,8 @@ void write_debug_ppm(
                     3);
             } else {
                 const Vec3 break_point =
-                    midpoint(
-                        body.bones()[bone.parent].animated_position,
-                        bone.animated_position);
+                    (body.bones()[bone.parent].animated_position
+                     + bone.animated_position) * 0.5;
                 const auto point = projector.project(break_point);
                 if (point.valid) {
                     canvas.ring(
