@@ -3,12 +3,14 @@
 #include "sarx/gltf_character.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -32,6 +34,7 @@ struct Args {
     double fps{30.0};
     bool validate_branch_only{false};
     bool require_ground_contact{false};
+    bool require_articulated_limb{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -60,6 +63,8 @@ Args parse_args(int argc, char** argv) {
             args.validate_branch_only = true;
         } else if (value == "--require-ground-contact") {
             args.require_ground_contact = true;
+        } else if (value == "--require-articulated-limb") {
+            args.require_articulated_limb = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_severance_demo"
@@ -175,13 +180,8 @@ sarx::Vec3 used_centroid(
     return center / static_cast<double>(count);
 }
 
-double used_min_y(
+std::vector<std::uint8_t> used_vertices(
     const sarx::CharacterMeshFrame& frame) {
-
-    if (frame.indices.empty()) {
-        throw std::runtime_error(
-            "detached mesh has no triangles");
-    }
 
     std::vector<std::uint8_t> used(
         frame.positions.size(),
@@ -193,31 +193,187 @@ double used_min_y(
         }
     }
 
-    double min_y =
-        std::numeric_limits<double>::infinity();
-
-    for (std::size_t i = 0; i < used.size(); ++i) {
-        if (!used[i]) continue;
-        min_y = std::min(
-            min_y,
-            frame.positions[i].y);
-    }
-
-    if (!std::isfinite(min_y)) {
-        throw std::runtime_error(
-            "detached mesh owns no vertices");
-    }
-
-    return min_y;
+    return used;
 }
 
-void translate_mesh(
-    sarx::CharacterMeshFrame& frame,
-    const sarx::Vec3& delta) {
+using Triangle = std::array<std::uint32_t, 3>;
 
-    for (auto& position : frame.positions) {
-        position += delta;
+std::set<Triangle> triangle_set(
+    const sarx::CharacterMeshFrame& frame) {
+
+    std::set<Triangle> out;
+
+    for (std::size_t tri = 0;
+         tri + 2 < frame.indices.size();
+         tri += 3) {
+        out.insert({
+            frame.indices[tri + 0],
+            frame.indices[tri + 1],
+            frame.indices[tri + 2]
+        });
     }
+
+    return out;
+}
+
+sarx::CharacterMeshFrame triangle_difference(
+    const sarx::CharacterMeshFrame& outer,
+    const sarx::CharacterMeshFrame& inner) {
+
+    const auto inner_triangles =
+        triangle_set(inner);
+
+    sarx::CharacterMeshFrame result;
+    result.positions = outer.positions;
+
+    for (std::size_t tri = 0;
+         tri + 2 < outer.indices.size();
+         tri += 3) {
+
+        const Triangle key{
+            outer.indices[tri + 0],
+            outer.indices[tri + 1],
+            outer.indices[tri + 2]
+        };
+
+        if (!inner_triangles.contains(key)) {
+            result.indices.insert(
+                result.indices.end(),
+                key.begin(),
+                key.end());
+        }
+    }
+
+    if (result.indices.empty()) {
+        throw std::runtime_error(
+            "articulated limb segment owns no triangles");
+    }
+
+    return result;
+}
+
+sarx::Vec3 nearest_anchor(
+    const sarx::CharacterMeshFrame& a,
+    const sarx::CharacterMeshFrame& b) {
+
+    const auto used_a = used_vertices(a);
+    const auto used_b = used_vertices(b);
+
+    double best =
+        std::numeric_limits<double>::infinity();
+
+    sarx::Vec3 best_a{};
+    sarx::Vec3 best_b{};
+
+    for (std::size_t i = 0;
+         i < used_a.size();
+         ++i) {
+        if (!used_a[i]) continue;
+
+        for (std::size_t j = 0;
+             j < used_b.size();
+             ++j) {
+            if (!used_b[j]) continue;
+
+            const double d2 =
+                sarx::length_squared(
+                    a.positions[i]
+                    - b.positions[j]);
+
+            if (d2 < best) {
+                best = d2;
+                best_a = a.positions[i];
+                best_b = b.positions[j];
+            }
+        }
+    }
+
+    if (!std::isfinite(best)) {
+        throw std::runtime_error(
+            "could not infer articulated limb joint anchor");
+    }
+
+    return (best_a + best_b) * 0.5;
+}
+
+sarx::Vec3 farthest_used_point(
+    const sarx::CharacterMeshFrame& frame,
+    const sarx::Vec3& from) {
+
+    const auto used = used_vertices(frame);
+
+    double best = -1.0;
+    sarx::Vec3 point{};
+
+    for (std::size_t i = 0;
+         i < used.size();
+         ++i) {
+        if (!used[i]) continue;
+
+        const double d2 =
+            sarx::length_squared(
+                frame.positions[i] - from);
+
+        if (d2 > best) {
+            best = d2;
+            point = frame.positions[i];
+        }
+    }
+
+    if (best < 0.0) {
+        throw std::runtime_error(
+            "could not infer detached hand endpoint");
+    }
+
+    return point;
+}
+
+sarx::CharacterMeshFrame transform_segment(
+    const sarx::CharacterMeshFrame& rest,
+    const sarx::Vec3& rest_a,
+    const sarx::Vec3& rest_b,
+    const sarx::Vec3& current_a,
+    const sarx::Vec3& current_b) {
+
+    sarx::CharacterMeshFrame out = rest;
+
+    const sarx::Vec3 rest_axis =
+        rest_b - rest_a;
+    const sarx::Vec3 current_axis =
+        current_b - current_a;
+
+    for (auto& position : out.positions) {
+        position =
+            current_a
+            + sarx::rotate_between(
+                rest_axis,
+                current_axis,
+                position - rest_a);
+    }
+
+    return out;
+}
+
+double joint_angle(
+    const sarx::Vec3& a,
+    const sarx::Vec3& joint,
+    const sarx::Vec3& b) {
+
+    const sarx::Vec3 u =
+        sarx::normalized(a - joint);
+    const sarx::Vec3 v =
+        sarx::normalized(b - joint);
+
+    if (sarx::length_squared(u) <= 1e-12
+        || sarx::length_squared(v) <= 1e-12) {
+        return 0.0;
+    }
+
+    return std::acos(
+        std::clamp(
+            sarx::dot(u, v),
+            -1.0,
+            1.0));
 }
 
 sarx::CharacterMeshFrame combine(
@@ -403,12 +559,14 @@ int main(int argc, char** argv) {
                 };
             };
 
-        sarx::CharacterMeshFrame detached_snapshot;
-        sarx::Vec3 detached_origin{};
-        double detached_local_min_y = 0.0;
+        sarx::CharacterMeshFrame upperarm_snapshot;
+        sarx::CharacterMeshFrame forearm_snapshot;
+        sarx::CharacterMeshFrame hand_snapshot;
+
+        std::array<sarx::Vec3, 4> rest_anchors{};
+        std::array<sarx::ParticleId, 4> limb_particles{};
 
         sarx::Body detached_motion;
-        sarx::ParticleId detached_particle = 0;
         bool cut = false;
 
         std::size_t boundary_triangles = 0;
@@ -416,10 +574,15 @@ int main(int argc, char** argv) {
         std::size_t ground_contacts = 0;
         bool ever_grounded = false;
 
+        double initial_elbow_angle = 0.0;
+        double initial_wrist_angle = 0.0;
+        double max_elbow_angle_delta = 0.0;
+        double max_wrist_angle_delta = 0.0;
+
         sarx::StepConfig detached_step;
-        detached_step.substeps = 2;
-        detached_step.solver_iterations = 1;
-        detached_step.gravity = {0.0, -1.8, 0.0};
+        detached_step.substeps = 4;
+        detached_step.solver_iterations = 10;
+        detached_step.gravity = {0.0, -9.81, 0.0};
 
         const double dt = 1.0 / args.fps;
 
@@ -449,9 +612,17 @@ int main(int argc, char** argv) {
                         world_offset);
 
                 if (!cut) {
+                    if (args.detached_root != "upperarm_r") {
+                        throw std::runtime_error(
+                            "articulated evidence path currently requires upperarm_r");
+                    }
+
                     const double previous_seconds =
                         static_cast<double>(frame - 1)
                         / args.fps;
+
+                    const sarx::Vec3 previous_offset =
+                        world_offset_for(frame - 1);
 
                     const auto previous_split =
                         character.sample_split_branch(
@@ -459,36 +630,149 @@ int main(int argc, char** argv) {
                             previous_seconds,
                             args.detached_root,
                             true,
-                            world_offset_for(frame - 1));
+                            previous_offset);
 
-                    detached_snapshot =
-                        split.detached;
+                    const auto lower_split =
+                        character.sample_split_branch(
+                            clip,
+                            seconds,
+                            "lowerarm_r",
+                            true,
+                            world_offset);
 
-                    detached_origin =
-                        used_centroid(
-                            detached_snapshot);
+                    const auto hand_split =
+                        character.sample_split_branch(
+                            clip,
+                            seconds,
+                            "hand_r",
+                            true,
+                            world_offset);
 
-                    detached_local_min_y =
-                        used_min_y(detached_snapshot)
-                        - detached_origin.y;
+                    const auto previous_lower_split =
+                        character.sample_split_branch(
+                            clip,
+                            previous_seconds,
+                            "lowerarm_r",
+                            true,
+                            previous_offset);
 
-                    const sarx::Vec3 previous_center =
-                        used_centroid(
-                            previous_split.detached);
+                    const auto previous_hand_split =
+                        character.sample_split_branch(
+                            clip,
+                            previous_seconds,
+                            "hand_r",
+                            true,
+                            previous_offset);
 
-                    const sarx::Vec3 inherited_velocity =
-                        (detached_origin - previous_center)
-                        / dt;
+                    upperarm_snapshot =
+                        triangle_difference(
+                            split.detached,
+                            lower_split.detached);
 
-                    detached_particle =
-                        detached_motion.add_particle(
-                            detached_origin,
-                            1.0);
+                    forearm_snapshot =
+                        triangle_difference(
+                            lower_split.detached,
+                            hand_split.detached);
 
-                    detached_motion
-                        .particles()[detached_particle]
-                        .velocity =
-                            inherited_velocity;
+                    hand_snapshot =
+                        hand_split.detached;
+
+                    const auto previous_upperarm =
+                        triangle_difference(
+                            previous_split.detached,
+                            previous_lower_split.detached);
+
+                    const auto previous_forearm =
+                        triangle_difference(
+                            previous_lower_split.detached,
+                            previous_hand_split.detached);
+
+                    const auto previous_hand =
+                        previous_hand_split.detached;
+
+                    rest_anchors[0] =
+                        nearest_anchor(
+                            split.body,
+                            upperarm_snapshot);
+                    rest_anchors[1] =
+                        nearest_anchor(
+                            upperarm_snapshot,
+                            forearm_snapshot);
+                    rest_anchors[2] =
+                        nearest_anchor(
+                            forearm_snapshot,
+                            hand_snapshot);
+                    rest_anchors[3] =
+                        farthest_used_point(
+                            hand_snapshot,
+                            rest_anchors[2]);
+
+                    std::array<sarx::Vec3, 4> previous_anchors{};
+                    previous_anchors[0] =
+                        nearest_anchor(
+                            previous_split.body,
+                            previous_upperarm);
+                    previous_anchors[1] =
+                        nearest_anchor(
+                            previous_upperarm,
+                            previous_forearm);
+                    previous_anchors[2] =
+                        nearest_anchor(
+                            previous_forearm,
+                            previous_hand);
+                    previous_anchors[3] =
+                        farthest_used_point(
+                            previous_hand,
+                            previous_anchors[2]);
+
+                    const double masses[4] = {
+                        0.32,
+                        0.28,
+                        0.22,
+                        0.18
+                    };
+
+                    for (std::size_t i = 0;
+                         i < limb_particles.size();
+                         ++i) {
+
+                        limb_particles[i] =
+                            detached_motion.add_particle(
+                                rest_anchors[i],
+                                masses[i]);
+
+                        detached_motion
+                            .particles()[limb_particles[i]]
+                            .velocity =
+                                (rest_anchors[i]
+                                 - previous_anchors[i])
+                                / dt;
+                    }
+
+                    detached_motion.add_structural_constraint(
+                        limb_particles[0],
+                        limb_particles[1],
+                        1e-8);
+                    detached_motion.add_structural_constraint(
+                        limb_particles[1],
+                        limb_particles[2],
+                        1e-8);
+                    detached_motion.add_structural_constraint(
+                        limb_particles[2],
+                        limb_particles[3],
+                        1e-8);
+
+                    initial_elbow_angle =
+                        joint_angle(
+                            rest_anchors[0],
+                            rest_anchors[1],
+                            rest_anchors[2]);
+
+                    initial_wrist_angle =
+                        joint_angle(
+                            rest_anchors[1],
+                            rest_anchors[2],
+                            rest_anchors[3]);
 
                     boundary_triangles =
                         split.boundary_triangles_removed;
@@ -502,57 +786,113 @@ int main(int argc, char** argv) {
                         dt,
                         detached_step);
 
-                    // This is intentionally a narrow ground-plane contact
-                    // model for the evidence demo, not a claim of general
-                    // character/world collision support.
-                    auto& particle =
-                        detached_motion
-                            .particles()[detached_particle];
+                    constexpr double ground_radius = 0.035;
+                    constexpr double restitution = 0.16;
+                    constexpr double tangential_damping = 0.78;
 
-                    const double lowest_y =
-                        particle.position.y
-                        + detached_local_min_y;
+                    for (const sarx::ParticleId id
+                         : limb_particles) {
 
-                    if (lowest_y < 0.0) {
-                        particle.position.y -= lowest_y;
+                        auto& particle =
+                            detached_motion.particles()[id];
 
-                        if (particle.velocity.y < 0.0) {
-                            constexpr double restitution = 0.18;
-                            particle.velocity.y =
-                                -particle.velocity.y
-                                * restitution;
+                        if (particle.position.y < ground_radius) {
+                            particle.position.y = ground_radius;
+
+                            if (particle.velocity.y < 0.0) {
+                                particle.velocity.y =
+                                    -particle.velocity.y
+                                    * restitution;
+                            }
+
+                            particle.velocity.x *= tangential_damping;
+                            particle.velocity.z *= tangential_damping;
+
+                            if (std::abs(particle.velocity.y) < 0.05) {
+                                particle.velocity.y = 0.0;
+                            }
+
+                            ++ground_contacts;
+                            ever_grounded = true;
                         }
-
-                        constexpr double tangential_damping = 0.72;
-                        particle.velocity.x *= tangential_damping;
-                        particle.velocity.z *= tangential_damping;
-
-                        if (std::abs(particle.velocity.y) < 0.06) {
-                            particle.velocity.y = 0.0;
-                        }
-
-                        ++ground_contacts;
-                        ever_grounded = true;
                     }
                 }
 
-                sarx::CharacterMeshFrame detached =
-                    detached_snapshot;
-
-                const sarx::Vec3 delta =
+                const sarx::Vec3 shoulder =
                     detached_motion
-                        .particles()[detached_particle]
-                        .position
-                    - detached_origin;
+                        .particles()[limb_particles[0]]
+                        .position;
+                const sarx::Vec3 elbow =
+                    detached_motion
+                        .particles()[limb_particles[1]]
+                        .position;
+                const sarx::Vec3 wrist =
+                    detached_motion
+                        .particles()[limb_particles[2]]
+                        .position;
+                const sarx::Vec3 hand_tip =
+                    detached_motion
+                        .particles()[limb_particles[3]]
+                        .position;
 
-                translate_mesh(
-                    detached,
-                    delta);
+                const double elbow_angle =
+                    joint_angle(
+                        shoulder,
+                        elbow,
+                        wrist);
+
+                const double wrist_angle =
+                    joint_angle(
+                        elbow,
+                        wrist,
+                        hand_tip);
+
+                max_elbow_angle_delta =
+                    std::max(
+                        max_elbow_angle_delta,
+                        std::abs(
+                            elbow_angle
+                            - initial_elbow_angle));
+
+                max_wrist_angle_delta =
+                    std::max(
+                        max_wrist_angle_delta,
+                        std::abs(
+                            wrist_angle
+                            - initial_wrist_angle));
+
+                const auto upperarm =
+                    transform_segment(
+                        upperarm_snapshot,
+                        rest_anchors[0],
+                        rest_anchors[1],
+                        shoulder,
+                        elbow);
+
+                const auto forearm =
+                    transform_segment(
+                        forearm_snapshot,
+                        rest_anchors[1],
+                        rest_anchors[2],
+                        elbow,
+                        wrist);
+
+                const auto hand =
+                    transform_segment(
+                        hand_snapshot,
+                        rest_anchors[2],
+                        rest_anchors[3],
+                        wrist,
+                        hand_tip);
 
                 visible =
                     combine(
-                        split.body,
-                        detached);
+                        combine(
+                            combine(
+                                split.body,
+                                upperarm),
+                            forearm),
+                        hand);
             }
 
             sarx::write_character_ppm(
@@ -570,6 +910,13 @@ int main(int argc, char** argv) {
                 "detached Quaternius limb never reached the floor");
         }
 
+        if (args.require_articulated_limb
+            && max_elbow_angle_delta < 0.08
+            && max_wrist_angle_delta < 0.08) {
+            throw std::runtime_error(
+                "detached Quaternius arm never articulated after severance");
+        }
+
         std::cout
             << "SARX real character severance demo complete:"
             << " clip="
@@ -582,6 +929,10 @@ int main(int argc, char** argv) {
             << detached_triangles
             << " ground_contacts="
             << ground_contacts
+            << " max_elbow_delta_rad="
+            << max_elbow_angle_delta
+            << " max_wrist_delta_rad="
+            << max_wrist_angle_delta
             << " frames="
             << args.frames
             << " output="
