@@ -1011,9 +1011,11 @@ VoxelizedCharacter::damage_anatomical_interface(
 std::optional<DetachedVoxelComponent>
 VoxelizedCharacter::detach_anatomical_region_if_disconnected(
     const std::string& anatomical_region,
+    const std::vector<std::string>& proximal_regions,
     std::size_t minimum_voxels) {
 
     if (anatomical_region.empty()
+        || proximal_regions.empty()
         || minimum_voxels == 0) {
         throw std::invalid_argument(
             "invalid anatomical voxel detachment request");
@@ -1107,9 +1109,21 @@ VoxelizedCharacter::detach_anatomical_region_if_disconnected(
                 voxels_[found->second];
 
             if (neighbor.anatomical_region
-                != anatomical_region) {
+                    == anatomical_region) {
+                continue;
+            }
+
+            if (std::find(
+                    proximal_regions.begin(),
+                    proximal_regions.end(),
+                    neighbor.anatomical_region)
+                != proximal_regions.end()) {
                 return std::nullopt;
             }
+
+            // Face contact with an anatomically unrelated region is
+            // contact/proximity, not a tissue bridge. It must never keep
+            // a severed component under animation authority.
         }
     }
 
