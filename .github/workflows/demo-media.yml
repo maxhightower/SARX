@@ -5,6 +5,9 @@ on:
   pull_request:
     paths:
       - "tools/sarx_severance_demo.cpp"
+      - "tools/sarx_humanoid_demo.cpp"
+      - "src/humanoid.cpp"
+      - "include/sarx/humanoid.hpp"
       - "src/debug_render.cpp"
       - "include/sarx/debug_render.hpp"
       - ".github/workflows/demo-media.yml"
@@ -13,6 +16,9 @@ on:
       - "research/**"
     paths:
       - "tools/sarx_severance_demo.cpp"
+      - "tools/sarx_humanoid_demo.cpp"
+      - "src/humanoid.cpp"
+      - "include/sarx/humanoid.hpp"
       - "src/debug_render.cpp"
       - "include/sarx/debug_render.hpp"
       - ".github/workflows/demo-media.yml"
@@ -33,17 +39,26 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build demo
-        run: cmake --build build --config Release --target sarx_severance_demo
+      - name: Build demos
+        run: |
+          cmake --build build --config Release --target sarx_severance_demo
+          cmake --build build --config Release --target sarx_humanoid_demo
 
-      - name: Render frames
+      - name: Render bridge frames
         run: |
           ./build/sarx_severance_demo \
             --output build/demo_frames \
             --frames 120 \
             --cut-frame 45 | tee build/demo.log
 
-      - name: Encode MP4
+      - name: Render humanoid frames
+        run: |
+          ./build/sarx_humanoid_demo \
+            --output build/humanoid_frames \
+            --frames 150 \
+            --cut-frame 60 | tee build/humanoid.log
+
+      - name: Encode MP4s
         run: |
           mkdir -p build/media
           ffmpeg -y \
@@ -54,18 +69,37 @@ jobs:
             -crf 20 \
             build/media/v04c_arm_severance.mp4
 
-      - name: Encode GIF preview
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/humanoid_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v04d_humanoid_shoulder_severance.mp4
+
+      - name: Encode GIF previews
         run: |
           ffmpeg -y \
             -i build/media/v04c_arm_severance.mp4 \
             -vf "fps=15,scale=720:-1:flags=lanczos,palettegen" \
-            build/media/palette.png
+            build/media/palette_bridge.png
 
           ffmpeg -y \
             -i build/media/v04c_arm_severance.mp4 \
-            -i build/media/palette.png \
+            -i build/media/palette_bridge.png \
             -lavfi "fps=15,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse" \
             build/media/v04c_arm_severance.gif
+
+          ffmpeg -y \
+            -i build/media/v04d_humanoid_shoulder_severance.mp4 \
+            -vf "fps=15,scale=720:-1:flags=lanczos,palettegen" \
+            build/media/palette_humanoid.png
+
+          ffmpeg -y \
+            -i build/media/v04d_humanoid_shoulder_severance.mp4 \
+            -i build/media/palette_humanoid.png \
+            -lavfi "fps=15,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse" \
+            build/media/v04d_humanoid_shoulder_severance.gif
 
       - name: Record provenance
         run: |
@@ -77,8 +111,11 @@ jobs:
             echo "backend=CPU Body"
             echo "scheduler=full pre-cut; adaptive wound-domain + free-island closure post-cut"
             echo
-            echo "[demo log]"
+            echo "[bridge demo log]"
             cat build/demo.log
+            echo
+            echo "[humanoid demo log]"
+            cat build/humanoid.log
           } > build/media/provenance.txt
 
       - name: Upload prototype media
@@ -88,5 +125,7 @@ jobs:
           path: |
             build/media/v04c_arm_severance.mp4
             build/media/v04c_arm_severance.gif
+            build/media/v04d_humanoid_shoulder_severance.mp4
+            build/media/v04d_humanoid_shoulder_severance.gif
             build/media/provenance.txt
           if-no-files-found: error
