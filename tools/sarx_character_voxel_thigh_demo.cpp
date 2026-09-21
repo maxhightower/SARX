@@ -481,6 +481,7 @@ int main(int argc, char** argv) {
         double root_velocity_discontinuity = 0.0;
         double fall_centroid_drop = 0.0;
         double max_fall_pose_rms = 0.0;
+        double max_fall_floor_projection = 0.0;
         int recovery_selected_frame = -1;
         int recovery_completed_frame = -1;
 
@@ -501,6 +502,7 @@ int main(int argc, char** argv) {
         double grounded_velocity_discontinuity = 0.0;
         double max_grounded_pose_rms = 0.0;
         double grounded_centroid_rise = 0.0;
+        double max_grounded_floor_projection = 0.0;
 
         std::size_t fall_body_ground_contacts = 0;
         double fall_body_min_y =
@@ -994,6 +996,64 @@ int main(int argc, char** argv) {
                     ++centroid_count;
                 }
 
+                double attached_min_y =
+                    std::numeric_limits<double>::infinity();
+
+                for (std::size_t i = 0;
+                     i < voxel_centers.size();
+                     ++i) {
+
+                    if (voxel_character
+                            .voxels()[i]
+                            .state
+                        != sarx::CharacterVoxelState::Attached) {
+                        continue;
+                    }
+
+                    attached_min_y =
+                        std::min(
+                            attached_min_y,
+                            voxel_centers[i].y);
+                }
+
+                const double floor_center_y =
+                    args.voxel_size * 0.50;
+
+                const double floor_projection =
+                    std::isfinite(attached_min_y)
+                    ? std::max(
+                        0.0,
+                        floor_center_y
+                            - attached_min_y)
+                    : 0.0;
+
+                if (floor_projection > 0.0) {
+                    for (std::size_t i = 0;
+                         i < voxel_centers.size();
+                         ++i) {
+
+                        if (voxel_character
+                                .voxels()[i]
+                                .state
+                            != sarx::CharacterVoxelState::Attached) {
+                            continue;
+                        }
+
+                        voxel_centers[i].y +=
+                            floor_projection;
+                    }
+
+                    current_centroid.y +=
+                        floor_projection
+                        * static_cast<double>(
+                            centroid_count);
+
+                    max_fall_floor_projection =
+                        std::max(
+                            max_fall_floor_projection,
+                            floor_projection);
+                }
+
                 if (pose_count > 0) {
                     max_fall_pose_rms =
                         std::max(
@@ -1227,6 +1287,64 @@ int main(int argc, char** argv) {
                     current_centroid +=
                         local_current;
                     ++centroid_count;
+                }
+
+                double attached_min_y =
+                    std::numeric_limits<double>::infinity();
+
+                for (std::size_t i = 0;
+                     i < voxel_centers.size();
+                     ++i) {
+
+                    if (voxel_character
+                            .voxels()[i]
+                            .state
+                        != sarx::CharacterVoxelState::Attached) {
+                        continue;
+                    }
+
+                    attached_min_y =
+                        std::min(
+                            attached_min_y,
+                            voxel_centers[i].y);
+                }
+
+                const double floor_center_y =
+                    args.voxel_size * 0.50;
+
+                const double floor_projection =
+                    std::isfinite(attached_min_y)
+                    ? std::max(
+                        0.0,
+                        floor_center_y
+                            - attached_min_y)
+                    : 0.0;
+
+                if (floor_projection > 0.0) {
+                    for (std::size_t i = 0;
+                         i < voxel_centers.size();
+                         ++i) {
+
+                        if (voxel_character
+                                .voxels()[i]
+                                .state
+                            != sarx::CharacterVoxelState::Attached) {
+                            continue;
+                        }
+
+                        voxel_centers[i].y +=
+                            floor_projection;
+                    }
+
+                    current_centroid.y +=
+                        floor_projection
+                        * static_cast<double>(
+                            centroid_count);
+
+                    max_grounded_floor_projection =
+                        std::max(
+                            max_grounded_floor_projection,
+                            floor_projection);
                 }
 
                 if (pose_count > 0) {
@@ -1475,6 +1593,15 @@ int main(int argc, char** argv) {
         }
 
         if (args.require_grounded_recovery
+            && fall_body_min_y
+                < args.voxel_size * 0.49) {
+            throw std::runtime_error(
+                "attached body penetrated the floor at grounded recovery: "
+                + std::to_string(
+                    fall_body_min_y));
+        }
+
+        if (args.require_grounded_recovery
             && (grounded_recovery_selected_frame < 0
                 || grounded_recovery_plan.strategy
                     != sarx::MotionStrategy::Kneel
@@ -1544,6 +1671,8 @@ int main(int argc, char** argv) {
             << fall_centroid_drop
             << " fall_pose_rms="
             << max_fall_pose_rms
+            << " max_fall_floor_projection="
+            << max_fall_floor_projection
             << " fall_body_ground_contacts="
             << fall_body_ground_contacts
             << " fall_body_min_y="
@@ -1565,6 +1694,8 @@ int main(int argc, char** argv) {
             << grounded_velocity_discontinuity
             << " grounded_pose_rms="
             << max_grounded_pose_rms
+            << " max_grounded_floor_projection="
+            << max_grounded_floor_projection
             << " grounded_centroid_rise="
             << grounded_centroid_rise
             << " grounded_followup_options="
