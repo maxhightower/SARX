@@ -26,6 +26,7 @@ struct Args {
 
     int frames{180};
     double fps{30.0};
+    bool list_joints{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -57,6 +58,9 @@ Args parse_args(int argc, char** argv) {
             value == "--fps"
             && i + 1 < argc) {
             args.fps = std::stod(argv[++i]);
+        } else if (
+            value == "--list-joints") {
+            args.list_joints = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_demo"
@@ -65,7 +69,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--clip NAME_FRAGMENT]"
                 << " [--output DIR]"
                 << " [--frames N]"
-                << " [--fps N]\n";
+                << " [--fps N]"
+                << " [--list-joints]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -145,6 +150,24 @@ int main(int argc, char** argv) {
         character.load(
             args.character,
             args.animations);
+
+        if (args.list_joints) {
+            std::cout << "[skin joints]\n";
+            for (const auto& joint
+                 : character.skin_joints()) {
+                std::cout
+                    << joint.name
+                    << " parent="
+                    << joint.parent
+                    << " rest=("
+                    << joint.rest_world_position.x
+                    << ","
+                    << joint.rest_world_position.y
+                    << ","
+                    << joint.rest_world_position.z
+                    << ")\n";
+            }
+        }
 
         std::size_t clip = 0;
 
