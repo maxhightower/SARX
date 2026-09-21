@@ -491,6 +491,77 @@ std::size_t VoxelizedCharacter::damage_sphere(
 }
 
 
+std::size_t VoxelizedCharacter::damage_cut_disk(
+    const CharacterMeshFrame& animated_mesh,
+    const Vec3& center,
+    const Vec3& normal,
+    double half_thickness,
+    double radius,
+    double damage) {
+
+    if (half_thickness <= 0.0
+        || radius <= 0.0
+        || damage < 0.0) {
+        throw std::invalid_argument(
+            "invalid character voxel cut disk");
+    }
+
+    const Vec3 axis =
+        normalized(normal);
+
+    if (length_squared(axis) <= 1e-12) {
+        throw std::invalid_argument(
+            "character voxel cut disk normal must be non-zero");
+    }
+
+    const double radius_squared =
+        radius * radius;
+
+    std::size_t destroyed = 0;
+
+    for (CharacterVoxel& voxel : voxels_) {
+        if (voxel.state
+            != CharacterVoxelState::Attached) {
+            continue;
+        }
+
+        const Vec3 position =
+            current_center(
+                voxel,
+                animated_mesh);
+
+        const Vec3 relative =
+            position - center;
+
+        const double axial =
+            dot(relative, axis);
+
+        if (std::abs(axial)
+            > half_thickness) {
+            continue;
+        }
+
+        const Vec3 radial =
+            relative - axis * axial;
+
+        if (length_squared(radial)
+            > radius_squared) {
+            continue;
+        }
+
+        voxel.damage += damage;
+
+        if (voxel.damage
+            >= voxel.break_damage) {
+            voxel.state =
+                CharacterVoxelState::Destroyed;
+            ++destroyed;
+        }
+    }
+
+    return destroyed;
+}
+
 CharacterMeshFrame VoxelizedCharacter::render_component(
     const DetachedVoxelComponent& component,
     const std::vector<Vec3>& world_centers) const {
