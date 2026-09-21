@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(SARX VERSION 0.4.0 LANGUAGES CXX)
+project(SARX VERSION 0.4.2 LANGUAGES CXX)
 
 option(SARX_BUILD_TESTS "Build SARX tests" ON)
 
