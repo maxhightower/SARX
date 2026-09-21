@@ -9,7 +9,9 @@ Selected clips:
 | --- | --- | --- |
 | CMU_Limp | 91_16 | Limp |
 | CMU_HurtLegWalk | 91_24 | HurtLegWalk |
-| CMU_DragBadLegWalk | 91_25 | DragBadLegWalk |
+| CMU_DragBadLegWalk | 91_25 | DragBadLegWalk — retained for other severe leg cases, excluded from isolated foot-loss selection |
+| CMU_WalkWoundedLeg | 139_19 | Walk Wounded Leg |
+| CMU_PainfulLeftKnee | 142_12 | Painfulleftknee |
 
 The source motion data is from https://mocap.cs.cmu.edu/ and is obtained in FBX
 form through the public `gbionics/cmu-fbx` dataset. That dataset documents that
