@@ -32,6 +32,7 @@ struct VoxelLatticeSpec {
     // Six deterministic tetrahedra per lattice cell, sharing the 000->111 diagonal.
     bool include_tetrahedra{true};
     double volume_compliance{0.0};
+    double volume_break_damage{1.0};
 };
 
 class VoxelLattice {
