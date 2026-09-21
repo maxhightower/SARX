@@ -160,6 +160,147 @@ SolverDomain solver_domain(const AdaptiveDamageDomain& domain) {
     return result;
 }
 
+AdaptiveDamageDomain close_over_free_islands(
+    const Body& body,
+    const AdaptiveDamageDomain& seed) {
+
+    AdaptiveDamageDomain result = seed;
+
+    std::vector<std::uint8_t> selected(
+        body.particles().size(),
+        0u);
+
+    for (const ParticleId id : seed.particles) {
+        if (id >= selected.size()) {
+            throw std::out_of_range(
+                "adaptive free-island seed particle out of range");
+        }
+        selected[id] = 1u;
+    }
+
+    bool added_free_island = false;
+
+    for (const auto& island : body.islands()) {
+        if (island.rig_authoritative) {
+            continue;
+        }
+
+        bool intersects_seed = false;
+        for (const ParticleId id : island.particles) {
+            if (selected[id]) {
+                intersects_seed = true;
+                break;
+            }
+        }
+
+        if (!intersects_seed) {
+            continue;
+        }
+
+        for (const ParticleId id : island.particles) {
+            selected[id] = 1u;
+        }
+        added_free_island = true;
+    }
+
+    if (!added_free_island) {
+        return result;
+    }
+
+    result.particles.clear();
+    for (ParticleId id = 0; id < selected.size(); ++id) {
+        if (selected[id]) {
+            result.particles.push_back(id);
+        }
+    }
+
+    auto append_unique_active_primitives = [&body, &selected, &result]() {
+        std::vector<std::uint8_t> structural_seen(
+            body.structural_constraints().size(),
+            0u);
+        for (const auto id : result.structural) {
+            if (id < structural_seen.size()) structural_seen[id] = 1u;
+        }
+
+        for (ConstraintId id = 0;
+             id < body.structural_constraints().size();
+             ++id) {
+
+            const auto& constraint =
+                body.structural_constraints()[id];
+            if (!constraint.active || structural_seen[id]) continue;
+
+            if (selected[constraint.a] && selected[constraint.b]) {
+                result.structural.push_back(id);
+                structural_seen[id] = 1u;
+            }
+        }
+
+        std::vector<std::uint8_t> tetrahedral_seen(
+            body.tetrahedral_constraints().size(),
+            0u);
+        for (const auto id : result.tetrahedral) {
+            if (id < tetrahedral_seen.size()) tetrahedral_seen[id] = 1u;
+        }
+
+        for (ConstraintId id = 0;
+             id < body.tetrahedral_constraints().size();
+             ++id) {
+
+            const auto& tet =
+                body.tetrahedral_constraints()[id];
+            if (!tet.active || tetrahedral_seen[id]) continue;
+
+            if (selected[tet.a]
+                && selected[tet.b]
+                && selected[tet.c]
+                && selected[tet.d]) {
+                result.tetrahedral.push_back(id);
+                tetrahedral_seen[id] = 1u;
+            }
+        }
+
+        std::vector<std::uint8_t> attachment_seen(
+            body.attachments().size(),
+            0u);
+        for (const auto id : result.attachments) {
+            if (id < attachment_seen.size()) attachment_seen[id] = 1u;
+        }
+
+        for (ConstraintId id = 0;
+             id < body.attachments().size();
+             ++id) {
+
+            const auto& attachment = body.attachments()[id];
+            if (!attachment.active || attachment_seen[id]) continue;
+
+            if (selected[attachment.particle]) {
+                result.attachments.push_back(id);
+                attachment_seen[id] = 1u;
+            }
+        }
+    };
+
+    append_unique_active_primitives();
+
+    std::sort(result.structural.begin(), result.structural.end());
+    result.structural.erase(
+        std::unique(result.structural.begin(), result.structural.end()),
+        result.structural.end());
+
+    std::sort(result.tetrahedral.begin(), result.tetrahedral.end());
+    result.tetrahedral.erase(
+        std::unique(result.tetrahedral.begin(), result.tetrahedral.end()),
+        result.tetrahedral.end());
+
+    std::sort(result.attachments.begin(), result.attachments.end());
+    result.attachments.erase(
+        std::unique(result.attachments.begin(), result.attachments.end()),
+        result.attachments.end());
+
+    return result;
+}
+
 void AdaptiveDomainTracker::reset(const Body& body) {
     particle_count_ = body.particles().size();
     structural_count_ = body.structural_constraints().size();
