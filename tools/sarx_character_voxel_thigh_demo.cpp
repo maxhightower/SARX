@@ -869,39 +869,31 @@ int main(int argc, char** argv) {
                                 detached_centers));
             }
 
-            sarx::Vec3 camera_target =
-                cut_center;
-
-            if (detached_leg
-                && !detached_centers.empty()) {
-
-                camera_target =
-                    (cut_center
-                     + centroid(
-                         detached_centers))
-                    * 0.5;
-            }
-
+            // Evidence camera follows only the character's deliberate
+            // world translation. Animated hip/knee motion, footsteps,
+            // the wound, and the detached leg never feed back into the
+            // camera transform, so gait motion cannot create camera shake.
             sarx::CharacterRenderCamera camera;
 
             camera.target =
-                camera_target
+                character_center
+                + world_offset
                 + sarx::Vec3{
                     0.0,
-                    -scale * 0.18,
+                    -scale * 0.12,
                     0.0
                 };
 
             camera.position =
                 camera.target
                 + sarx::Vec3{
-                    scale * 0.80,
-                    scale * 0.20,
-                    scale * 1.55
+                    scale * 0.88,
+                    scale * 0.22,
+                    scale * 1.78
                 };
 
             camera.vertical_fov_degrees =
-                32.0;
+                34.0;
 
             camera.width = 960;
             camera.height = 720;
