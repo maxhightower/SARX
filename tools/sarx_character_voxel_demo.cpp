@@ -864,46 +864,31 @@ int main(int argc, char** argv) {
                                 detached_centers));
             }
 
-            sarx::Vec3 camera_target =
-                wrist;
-
-            if (detached_hand
-                && !detached_centers.empty()) {
-
-                camera_target =
-                    (wrist
-                     + centroid(
-                         detached_centers))
-                    * 0.5;
-            } else {
-                camera_target =
-                    (wrist
-                     + animated_hand_center)
-                    * 0.5;
-            }
-
-            // Follow the actual left-wrist cut in a close three-quarter
-            // view so the voxel removal, separation, fall, and impact
-            // remain visible instead of happening off-camera.
+            // Stable three-quarter evidence camera. Follow only the
+            // scripted world translation; never chase the animated wrist
+            // or detached hand, which previously injected gait motion into
+            // the camera and made every footstep look like a shake.
             sarx::CharacterRenderCamera camera;
+
             camera.target =
-                camera_target
+                character_center
+                + world_offset
                 + sarx::Vec3{
                     0.0,
-                    -scale * 0.05,
+                    -scale * 0.04,
                     0.0
                 };
 
             camera.position =
                 camera.target
                 + sarx::Vec3{
-                    scale * 0.52,
-                    scale * 0.14,
-                    scale * 1.05
+                    scale * 0.72,
+                    scale * 0.18,
+                    scale * 1.42
                 };
 
             camera.vertical_fov_degrees =
-                30.0;
+                31.0;
 
             camera.width = 960;
             camera.height = 720;
