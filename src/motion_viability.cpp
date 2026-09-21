@@ -146,6 +146,50 @@ describe_motion_capability(
         return capability;
     }
 
+    if (name.find("limp")
+        != std::string::npos) {
+
+        capability.semantic_intent =
+            "move";
+        capability.locomotion_type =
+            MotionLocomotionType::Limp;
+
+        capability.required_regions = {
+            {"pelvis", 0.55},
+            {"spine_01", 0.45}
+        };
+
+        capability.alternative_chains = {
+            {
+                "usable_weight_bearing_leg",
+                {
+                    {
+                        {"thigh_l", 0.68},
+                        {"calf_l", 0.65},
+                        {"foot_l", 0.55}
+                    },
+                    {
+                        {"thigh_r", 0.68},
+                        {"calf_r", 0.65},
+                        {"foot_r", 0.55}
+                    }
+                },
+                1
+            }
+        };
+
+        capability.optional_regions = {
+            {"thigh_l", 0.45},
+            {"calf_l", 0.45},
+            {"thigh_r", 0.45},
+            {"calf_r", 0.45}
+        };
+
+        capability.minimum_support_contacts = 1;
+        capability.allows_airborne = false;
+        return capability;
+    }
+
     if (name.find("hop")
         != std::string::npos) {
 
