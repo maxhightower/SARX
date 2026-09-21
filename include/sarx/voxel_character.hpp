@@ -73,6 +73,16 @@ public:
         const Vec3& seed_world_point,
         std::size_t minimum_voxels = 4);
 
+    [[nodiscard]] std::optional<DetachedVoxelComponent>
+    detach_distal_region(
+        const CharacterMeshFrame& animated_mesh,
+        const Vec3& cut_center,
+        const Vec3& outward_normal,
+        const Vec3& seed_world_point,
+        double selection_radius,
+        double minimum_axial_offset,
+        std::size_t minimum_voxels = 4);
+
     [[nodiscard]] Vec3 voxel_center(
         std::size_t voxel_index,
         const CharacterMeshFrame& animated_mesh) const;
