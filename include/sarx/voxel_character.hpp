@@ -104,6 +104,12 @@ public:
         const std::vector<std::string>& proximal_regions,
         std::size_t minimum_voxels = 4);
 
+    [[nodiscard]] std::optional<DetachedVoxelComponent>
+    detach_component_near_anatomical(
+        const std::vector<Vec3>& world_centers,
+        const Vec3& seed_world_point,
+        std::size_t minimum_voxels = 4);
+
     [[nodiscard]] Vec3 voxel_center(
         std::size_t voxel_index,
         const std::vector<Vec3>& world_centers) const;
