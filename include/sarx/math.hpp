@@ -1,0 +1,60 @@
+#pragma once
+
+#include <cmath>
+
+namespace sarx {
+
+struct Vec3 {
+    double x{0.0};
+    double y{0.0};
+    double z{0.0};
+
+    constexpr Vec3() = default;
+    constexpr Vec3(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
+
+    constexpr Vec3& operator+=(const Vec3& rhs) {
+        x += rhs.x; y += rhs.y; z += rhs.z;
+        return *this;
+    }
+
+    constexpr Vec3& operator-=(const Vec3& rhs) {
+        x -= rhs.x; y -= rhs.y; z -= rhs.z;
+        return *this;
+    }
+
+    constexpr Vec3& operator*=(double s) {
+        x *= s; y *= s; z *= s;
+        return *this;
+    }
+};
+
+constexpr Vec3 operator+(Vec3 a, const Vec3& b) { return a += b; }
+constexpr Vec3 operator-(Vec3 a, const Vec3& b) { return a -= b; }
+constexpr Vec3 operator-(const Vec3& v) { return {-v.x, -v.y, -v.z}; }
+constexpr Vec3 operator*(Vec3 v, double s) { return v *= s; }
+constexpr Vec3 operator*(double s, Vec3 v) { return v *= s; }
+constexpr Vec3 operator/(Vec3 v, double s) { return {v.x / s, v.y / s, v.z / s}; }
+
+constexpr double dot(const Vec3& a, const Vec3& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+inline double length_squared(const Vec3& v) { return dot(v, v); }
+inline double length(const Vec3& v) { return std::sqrt(length_squared(v)); }
+
+inline Vec3 normalized(const Vec3& v) {
+    const double len = length(v);
+    return len > 1e-12 ? v / len : Vec3{};
+}
+
+inline bool nearly_equal(double a, double b, double eps = 1e-8) {
+    return std::abs(a - b) <= eps;
+}
+
+inline bool nearly_equal(const Vec3& a, const Vec3& b, double eps = 1e-8) {
+    return nearly_equal(a.x, b.x, eps)
+        && nearly_equal(a.y, b.y, eps)
+        && nearly_equal(a.z, b.z, eps);
+}
+
+} // namespace sarx
