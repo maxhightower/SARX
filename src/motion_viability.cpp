@@ -63,7 +63,7 @@ describe_motion_capability(
 
     if (contains_any(
             name,
-            {"limp", "hurtleg", "dragbadleg", "wounded"})) {
+            {"limp", "hurtleg", "dragbadleg", "wounded", "painful"})) {
 
         capability.semantic_intent =
             "move";
