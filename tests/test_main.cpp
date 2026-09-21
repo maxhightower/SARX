@@ -872,6 +872,92 @@ void test_cut_releases_tetrahedral_connectivity() {
           "tetrahedral topology failure should be explicit in the fracture event stream");
 }
 
+
+void test_anatomical_region_shapes_and_priority() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 5;
+    spec.ny = 3;
+    spec.nz = 3;
+    spec.spacing = 0.5;
+    spec.include_diagonals = false;
+    spec.include_tetrahedra = false;
+    spec.default_material = 1;
+
+    sarx::MaterialRegion muscle;
+    muscle.shape = sarx::RegionShape::Capsule;
+    muscle.a = {0.0, 0.5, 0.5};
+    muscle.b = {2.0, 0.5, 0.5};
+    muscle.radius = 0.30;
+    muscle.material = 30;
+    muscle.priority = 5;
+    muscle.fiber_direction = {1.0, 0.0, 0.0};
+
+    sarx::MaterialRegion bone;
+    bone.shape = sarx::RegionShape::Sphere;
+    bone.center = {1.0, 0.5, 0.5};
+    bone.radius = 0.26;
+    bone.material = 31;
+    bone.priority = 10;
+
+    const auto lattice =
+        sarx::build_voxel_lattice(spec, {muscle, bone});
+
+    const auto center = lattice.particle(2, 1, 1);
+    const auto muscle_node = lattice.particle(1, 1, 1);
+
+    check(lattice.particle_materials[center] == 31,
+          "higher-priority spherical bone region should override enclosing muscle capsule");
+    check(lattice.particle_materials[muscle_node] == 30,
+          "capsule-shaped muscle should assign material away from the bone core");
+    check(sarx::nearly_equal(
+              lattice.particle_fibers[muscle_node],
+              {1.0, 0.0, 0.0}),
+          "anatomical muscle region should assign its rest-space fiber direction");
+
+    const auto left = lattice.particle(0, 1, 1);
+    bool found_muscle_link = false;
+    for (const auto& constraint : lattice.body.structural_constraints()) {
+        const bool matches =
+            (constraint.a == left && constraint.b == muscle_node)
+            || (constraint.a == muscle_node && constraint.b == left);
+        if (!matches) continue;
+
+        found_muscle_link = true;
+        check(constraint.material == 30,
+              "constraint midpoint inside muscle capsule should inherit muscle material");
+        check(sarx::nearly_equal(
+                  constraint.material_fiber_rest,
+                  {1.0, 0.0, 0.0}),
+              "constraint should retain region-local anatomical fiber orientation");
+        break;
+    }
+    check(found_muscle_link,
+          "expected axial muscle constraint should exist in generated lattice");
+}
+
+void test_box_region_backwards_compatibility() {
+    sarx::VoxelLatticeSpec spec;
+    spec.nx = 2;
+    spec.ny = 2;
+    spec.nz = 2;
+    spec.spacing = 1.0;
+    spec.include_tetrahedra = false;
+
+    sarx::MaterialRegion box;
+    box.min = {0.5, -1.0, -1.0};
+    box.max = {2.0, 2.0, 2.0};
+    box.material = 44;
+    box.priority = 1;
+
+    const auto lattice = sarx::build_voxel_lattice(spec, {box});
+
+    check(lattice.particle_materials[lattice.particle(1, 0, 0)] == 44,
+          "default region shape should remain box for V0.4A compatibility");
+    check(lattice.particle_materials[lattice.particle(0, 0, 0)]
+              == sarx::kDefaultMaterial,
+          "box region should not leak outside its bounds");
+}
+
 } // namespace
 
 int main() {
@@ -898,6 +984,8 @@ int main() {
     test_tetrahedral_volume_constraint_restores_volume();
     test_voxel_lattice_generates_tetrahedral_cells();
     test_cut_releases_tetrahedral_connectivity();
+    test_anatomical_region_shapes_and_priority();
+    test_box_region_backwards_compatibility();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
