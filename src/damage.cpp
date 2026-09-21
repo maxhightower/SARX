@@ -1,6 +1,7 @@
 #include "sarx/damage.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
