@@ -1228,6 +1228,46 @@ double GltfCharacter::animation_duration(
     return impl_->clips[animation].duration;
 }
 
+std::vector<std::string>
+GltfCharacter::animation_target_nodes(
+    std::size_t animation) const {
+
+    if (animation >= impl_->clips.size()) {
+        throw std::out_of_range(
+            "animation index out of range");
+    }
+
+    std::vector<std::string> nodes;
+
+    for (const auto& track
+         : impl_->clips[animation].tracks) {
+
+        if (track.node < 0
+            || static_cast<std::size_t>(
+                track.node)
+                >= impl_->rest_nodes.size()) {
+            continue;
+        }
+
+        const std::string& name =
+            impl_->rest_nodes[
+                static_cast<std::size_t>(
+                    track.node)]
+                .name;
+
+        if (std::find(
+                nodes.begin(),
+                nodes.end(),
+                name)
+            == nodes.end()) {
+
+            nodes.push_back(name);
+        }
+    }
+
+    return nodes;
+}
+
 CharacterMeshFrame GltfCharacter::sample(
     std::size_t animation,
     double time_seconds,
