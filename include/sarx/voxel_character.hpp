@@ -93,6 +93,11 @@ public:
         double damage = 1.0,
         const std::vector<std::string>& allowed_regions = {});
 
+    std::size_t damage_anatomical_interface(
+        const std::string& distal_region,
+        const std::vector<std::string>& proximal_regions,
+        double damage = 1.0);
+
     [[nodiscard]] std::optional<DetachedVoxelComponent>
     detach_anatomical_region_if_disconnected(
         const std::string& anatomical_region,
