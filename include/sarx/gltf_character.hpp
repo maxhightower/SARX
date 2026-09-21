@@ -15,6 +15,12 @@ struct CharacterMeshFrame {
     std::vector<std::uint32_t> indices;
 };
 
+struct CharacterJointInfo {
+    std::string name;
+    std::string parent;
+    Vec3 rest_world_position{};
+};
+
 struct CharacterAssetStats {
     std::size_t vertices{};
     std::size_t triangles{};
@@ -40,6 +46,7 @@ public:
 
     [[nodiscard]] const CharacterAssetStats& stats() const;
     [[nodiscard]] const std::vector<std::string>& animation_names() const;
+    [[nodiscard]] const std::vector<CharacterJointInfo>& skin_joints() const;
 
     [[nodiscard]] std::size_t find_animation(
         const std::string& name_fragment) const;
