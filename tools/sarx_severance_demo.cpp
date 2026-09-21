@@ -69,30 +69,13 @@ void apply_severance_cut(
     sarx::Body& body,
     sarx::DamageSystem& damage) {
 
-    const double ys[] = {0.075, 0.225};
-    const double zs[] = {0.075, 0.225};
+    sarx::PlaneCutDamage cut;
+    cut.center = {0.825, 0.15, 0.15};
+    cut.normal = {1.0, 0.0, 0.0};
+    cut.radius = 0.24;
+    cut.energy = 3.0;
 
-    for (const double y : ys) {
-        sarx::CapsuleDamage blade;
-        blade.a = {0.825, y, -0.30};
-        blade.b = {0.825, y, 0.60};
-        blade.radius = 0.07;
-        blade.energy = 3.0;
-        blade.mode = sarx::DamageMode::Cut;
-        blade.cut_normal = {1.0, 0.0, 0.0};
-        (void)damage.apply_capsule(body, blade);
-    }
-
-    for (const double z : zs) {
-        sarx::CapsuleDamage blade;
-        blade.a = {0.825, -0.30, z};
-        blade.b = {0.825, 0.60, z};
-        blade.radius = 0.07;
-        blade.energy = 3.0;
-        blade.mode = sarx::DamageMode::Cut;
-        blade.cut_normal = {1.0, 0.0, 0.0};
-        (void)damage.apply_capsule(body, blade);
-    }
+    (void)damage.apply_plane_cut(body, cut);
 }
 
 } // namespace
