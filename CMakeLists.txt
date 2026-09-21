@@ -15,6 +15,7 @@ add_library(sarx
     src/gltf_character.cpp
     src/character_render.cpp
     src/voxel_character.cpp
+    src/motion_viability.cpp
 )
 
 target_include_directories(sarx
