@@ -30,6 +30,7 @@ struct CellKeyHash {
 
 enum class IndexedKind : unsigned char {
     Structural,
+    Tetrahedral,
     Attachment,
     BoneJoint
 };
@@ -124,6 +125,9 @@ struct DamageBroadPhase::Impl {
                         case IndexedKind::Structural:
                             result.candidates.structural.push_back(entry.id);
                             break;
+                        case IndexedKind::Tetrahedral:
+                            result.candidates.tetrahedral.push_back(entry.id);
+                            break;
                         case IndexedKind::Attachment:
                             result.candidates.attachments.push_back(entry.id);
                             break;
@@ -140,6 +144,7 @@ struct DamageBroadPhase::Impl {
             std::sort(ids.begin(), ids.end());
         };
         sort_ids(result.candidates.structural);
+        sort_ids(result.candidates.tetrahedral);
         sort_ids(result.candidates.attachments);
         sort_ids(result.candidates.bone_joints);
         return result;
@@ -168,6 +173,21 @@ void DamageBroadPhase::rebuild(const Body& body, double cell_size) {
         const Vec3 a = body.particles()[c.a].position;
         const Vec3 b = body.particles()[c.b].position;
         impl_->insert_aabb(min_vec(a, b), max_vec(a, b), Entry{IndexedKind::Structural, id});
+        ++impl_->indexed_primitives;
+    }
+
+    for (ConstraintId id = 0; id < body.tetrahedral_constraints().size(); ++id) {
+        const auto& t = body.tetrahedral_constraints()[id];
+        if (!t.active) continue;
+
+        const Vec3 p0 = body.particles()[t.a].position;
+        const Vec3 p1 = body.particles()[t.b].position;
+        const Vec3 p2 = body.particles()[t.c].position;
+        const Vec3 p3 = body.particles()[t.d].position;
+
+        Vec3 lo = min_vec(min_vec(p0, p1), min_vec(p2, p3));
+        Vec3 hi = max_vec(max_vec(p0, p1), max_vec(p2, p3));
+        impl_->insert_aabb(lo, hi, Entry{IndexedKind::Tetrahedral, id});
         ++impl_->indexed_primitives;
     }
 
