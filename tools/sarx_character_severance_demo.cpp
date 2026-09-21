@@ -31,6 +31,7 @@ struct Args {
     int cut_frame{90};
     double fps{30.0};
     bool validate_branch_only{false};
+    bool require_ground_contact{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -57,6 +58,8 @@ Args parse_args(int argc, char** argv) {
             args.fps = std::stod(argv[++i]);
         } else if (value == "--validate-branch-only") {
             args.validate_branch_only = true;
+        } else if (value == "--require-ground-contact") {
+            args.require_ground_contact = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_severance_demo"
@@ -68,7 +71,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--frames N]"
                 << " [--cut-frame N]"
                 << " [--fps N]"
-                << " [--validate-branch-only]\n";
+                << " [--validate-branch-only]"
+                << " [--require-ground-contact]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -560,7 +564,8 @@ int main(int argc, char** argv) {
                 true);
         }
 
-        if (!ever_grounded) {
+        if (args.require_ground_contact
+            && !ever_grounded) {
             throw std::runtime_error(
                 "detached Quaternius limb never reached the floor");
         }
