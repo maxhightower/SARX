@@ -160,7 +160,9 @@ jobs:
             --voxel-size 0.045 \
             --require-damage \
             --require-detachment \
-            --require-ground-contact | tee build/character_voxel.log
+            --require-ground-contact \
+            --require-anatomical-isolation \
+            --require-walk-viability | tee build/character_voxel.log
 
       - name: Encode MP4s
         run: |
