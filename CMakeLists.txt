@@ -11,6 +11,7 @@ add_library(sarx
     src/adaptive.cpp
     src/soa.cpp
     src/debug_render.cpp
+    src/humanoid.cpp
 )
 
 target_include_directories(sarx
@@ -32,6 +33,12 @@ add_executable(sarx_severance_demo
 target_link_libraries(sarx_severance_demo PRIVATE sarx)
 target_compile_features(sarx_severance_demo PRIVATE cxx_std_20)
 
+add_executable(sarx_humanoid_demo
+    tools/sarx_humanoid_demo.cpp
+)
+target_link_libraries(sarx_humanoid_demo PRIVATE sarx)
+target_compile_features(sarx_humanoid_demo PRIVATE cxx_std_20)
+
 if (SARX_BUILD_TESTS)
     enable_testing()
 
@@ -47,6 +54,14 @@ if (SARX_BUILD_TESTS)
         NAME sarx_demo_smoke
         COMMAND sarx_severance_demo
             --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_demo_frames
+            --frames 5
+            --cut-frame 2
+    )
+
+    add_test(
+        NAME sarx_humanoid_demo_smoke
+        COMMAND sarx_humanoid_demo
+            --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_humanoid_frames
             --frames 5
             --cut-frame 2
     )
