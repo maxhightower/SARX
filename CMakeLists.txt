@@ -156,10 +156,12 @@ if (SARX_BUILD_TESTS)
                 --animations ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/animations.glb
                 --clip Walk
                 --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_real_voxel_frames
-                --frames 2
+                --frames 5
                 --damage-frame 1
                 --fps 30
-                --voxel-size 0.080
+                --voxel-size 0.045
+                --require-damage
+                --require-detachment
         )
 
         add_test(
