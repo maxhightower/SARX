@@ -25,3 +25,24 @@ was created with funding from NSF EIA-0196217."
 SARX's vendor workflow downloads only the selected source clips, converts them
 to GLB, and validates that their animated node names map to the SARX Quaternius
 integration character before they can become authoritative evidence.
+
+
+## SARX conversion policy
+
+The authored CMU source skeleton is explicitly mapped onto 19 major SARX
+Quaternius joints. The vendor gate requires at least 17 mapped target joints.
+External translation and scale animation channels are stripped after Blender
+conversion: CMU contributes authored joint rotations, while the SARX Quaternius
+character remains authoritative for rest offsets, bone lengths, scale, and
+world/root translation.
+
+The current validated converted assets have these SHA-256 values:
+
+```
+bf0a3a04ca8db6eacbd6a6118814f0d7f22623280ee7b5e347d1e39b52ab61a8  assets/cmu/CMU_DragBadLegWalk.glb
+a426327f5bdb9c3eecf016a32abf2afac3b2999821c43e2b7dc47354f427e241  assets/cmu/CMU_HurtLegWalk.glb
+553321a90d4fd5cdb2cd636d2cd96d3d04a3b650c99bc9ac9d3c55429880106d  assets/cmu/CMU_Limp.glb
+```
+
+The validator also rejects implausible converted motion scale before an asset
+can be committed.
