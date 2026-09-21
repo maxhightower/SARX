@@ -100,7 +100,8 @@ jobs:
             --frames 210 \
             --cut-frame 90 \
             --fps 30 \
-            --require-ground-contact | tee build/character_severance.log
+            --require-ground-contact \
+            --require-articulated-limb | tee build/character_severance.log
 
       - name: Encode MP4s
         run: |
