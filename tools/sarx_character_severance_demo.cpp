@@ -30,6 +30,7 @@ struct Args {
     int frames{210};
     int cut_frame{90};
     double fps{30.0};
+    bool validate_branch_only{false};
 };
 
 Args parse_args(int argc, char** argv) {
@@ -54,6 +55,8 @@ Args parse_args(int argc, char** argv) {
             args.cut_frame = std::stoi(argv[++i]);
         } else if (value == "--fps" && i + 1 < argc) {
             args.fps = std::stod(argv[++i]);
+        } else if (value == "--validate-branch-only") {
+            args.validate_branch_only = true;
         } else if (value == "--help") {
             std::cout
                 << "sarx_character_severance_demo"
@@ -64,7 +67,8 @@ Args parse_args(int argc, char** argv) {
                 << " [--output DIR]"
                 << " [--frames N]"
                 << " [--cut-frame N]"
-                << " [--fps N]\n";
+                << " [--fps N]"
+                << " [--validate-branch-only]\n";
             std::exit(EXIT_SUCCESS);
         } else {
             throw std::invalid_argument(
@@ -221,6 +225,77 @@ int main(int argc, char** argv) {
 
         const std::size_t clip =
             character.find_animation(args.clip);
+
+        if (args.validate_branch_only) {
+            const double duration =
+                character.animation_duration(clip);
+
+            const double sample_times[] = {
+                0.0,
+                duration * 0.33,
+                duration * 0.66
+            };
+
+            std::size_t minimum_detached =
+                std::numeric_limits<std::size_t>::max();
+            std::size_t minimum_body =
+                std::numeric_limits<std::size_t>::max();
+            std::size_t maximum_boundary = 0;
+
+            for (const double sample_time
+                 : sample_times) {
+
+                const auto split =
+                    character.sample_split_branch(
+                        clip,
+                        sample_time,
+                        args.detached_root,
+                        true);
+
+                const std::size_t detached_triangles =
+                    split.detached.indices.size() / 3;
+                const std::size_t body_triangles =
+                    split.body.indices.size() / 3;
+
+                if (detached_triangles == 0
+                    || body_triangles == 0) {
+                    throw std::runtime_error(
+                        "branch split produced empty body or detached mesh");
+                }
+
+                minimum_detached =
+                    std::min(
+                        minimum_detached,
+                        detached_triangles);
+                minimum_body =
+                    std::min(
+                        minimum_body,
+                        body_triangles);
+                maximum_boundary =
+                    std::max(
+                        maximum_boundary,
+                        split.boundary_triangles_removed);
+            }
+
+            if (maximum_boundary == 0) {
+                throw std::runtime_error(
+                    "branch split removed no boundary triangles");
+            }
+
+            std::cout
+                << "SARX branch validation:"
+                << " detach_root=" << args.detached_root
+                << " samples=3"
+                << " min_detached_triangles="
+                << minimum_detached
+                << " min_body_triangles="
+                << minimum_body
+                << " max_boundary_triangles="
+                << maximum_boundary
+                << "\n";
+
+            return EXIT_SUCCESS;
+        }
 
         const auto initial =
             character.sample(
