@@ -817,6 +817,61 @@ void test_voxel_lattice_generates_tetrahedral_cells() {
     }
 }
 
+
+void test_cut_releases_tetrahedral_connectivity() {
+    Body body;
+    DamageSystem damage;
+
+    const auto p0 = body.add_particle({0.0, 0.0, 0.0});
+    const auto p1 = body.add_particle({1.0, 0.0, 0.0});
+    const auto p2 = body.add_particle({0.0, 1.0, 0.0});
+    const auto p3 = body.add_particle({0.0, 0.0, 1.0});
+
+    const auto tet =
+        body.add_tetrahedral_constraint(p0, p1, p2, p3, 0.0, 1.0);
+
+    check(body.islands().size() == 1,
+          "an active tetrahedral volume constraint should keep its particles in one physical island");
+
+    CapsuleDamage blade;
+    blade.a = {0.1, 0.1, -1.0};
+    blade.b = {0.1, 0.1, 1.0};
+    blade.radius = 0.02;
+    blade.energy = 1.2;
+    blade.mode = DamageMode::Cut;
+    blade.event_id = 900;
+
+    sarx::DamageBroadPhase broad_phase;
+    broad_phase.rebuild(body, 0.25);
+    const auto query = broad_phase.query_capsule(blade);
+
+    check(std::find(
+              query.candidates.tetrahedral.begin(),
+              query.candidates.tetrahedral.end(),
+              tet) != query.candidates.tetrahedral.end(),
+          "broad phase should return an intersectable tetrahedral cell");
+
+    const auto report =
+        damage.apply_capsule(body, blade, query.candidates);
+
+    check(!body.tetrahedral_constraints()[tet].active,
+          "cut centerline entering a tetrahedron should deactivate the volume constraint");
+    check(body.islands().size() == 4,
+          "after the only tetrahedral connection is cut, its four particles should become independent islands");
+
+    bool found_tet_break = false;
+    for (const auto& event : report.events) {
+        if (event.target_kind == sarx::DamageTargetKind::TetrahedralConstraint
+            && event.target_id == tet
+            && event.broke) {
+            found_tet_break = true;
+            break;
+        }
+    }
+    check(found_tet_break,
+          "tetrahedral topology failure should be explicit in the fracture event stream");
+}
+
 } // namespace
 
 int main() {
@@ -842,6 +897,7 @@ int main() {
     test_joint_capsule_is_indexed_by_broad_phase();
     test_tetrahedral_volume_constraint_restores_volume();
     test_voxel_lattice_generates_tetrahedral_cells();
+    test_cut_releases_tetrahedral_connectivity();
 
     if (failures != 0) {
         std::cerr << failures << " SARX test(s) failed.\n";
