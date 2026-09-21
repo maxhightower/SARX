@@ -168,15 +168,49 @@ The eventual target is GPU-oriented, but the CPU implementation is the authorita
 
 A GPU implementation should be tested against this reference rather than independently redefining these semantics.
 
-## Next milestone
+## V0.4A generated body fixture
 
-V0.4 should move from a generic constraint graph toward an actual destructible volumetric character fixture:
+SARX can now generate a reusable three-dimensional lattice rather than requiring tests to hand-author every particle and constraint.
 
-- tetrahedral/voxelized volume construction,
-- material regions and local fiber frames,
-- bone embedding/attachment generation,
-- joint capsules,
-- local adaptive damage domains,
-- GPU-friendly SoA buffers,
+A `VoxelLatticeSpec` defines:
+
+- origin,
+- X/Y/Z particle dimensions,
+- spacing,
+- particle mass,
+- default structural material,
+- structural compliance/break threshold,
+- whether diagonal links are included.
+
+The builder creates deterministic particle IDs and unique structural links. Axial-only mode provides a simple reference topology; diagonal mode adds face/body-diagonal support for a more isotropic spring network.
+
+### Spatial material regions
+
+`MaterialRegion` assigns materials by world-space bounds and priority.
+
+Particle materials are sampled at node positions. Structural materials are sampled at constraint midpoints, allowing a generated body to contain different tissue classes without hand-authoring constraint IDs.
+
+### Automatic bone embedding
+
+`embed_bone` adds a rig bone and attaches every lattice particle inside an influence radius.
+
+Each attachment stores:
+
+    local_offset = particle_rest_position - animated_bone_position
+
+so its target reconstructs the original physical rest pose exactly. Embedded child bones preserve the requested rig parent and therefore participate in the existing dynamic-rig-island semantics.
+
+V0.4A is intentionally still a particle/link reference volume, not the final continuum model. Its purpose is to create deterministic 3D fixtures on which the next mechanics can be developed and benchmarked.
+
+## Next milestone: V0.4B
+
+Continue from the generated lattice toward an anatomical deformable volume:
+
+- local material/fiber frames that move with deformation,
+- bone/joint capsule geometry rather than point-only bone targets,
+- explicit volumetric/tetrahedral constraints for volume preservation,
+- anatomical region construction,
+- adaptive damage-domain activation,
+- GPU-friendly structure-of-arrays buffers,
 - CPU/GPU parity harness,
-- first visual debug renderer for particles, constraints, bones, cuts, and islands.
+- first visual debug renderer for particles, constraints, bones, wounds, and islands.
