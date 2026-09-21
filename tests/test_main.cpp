@@ -2011,9 +2011,9 @@ void test_authored_injury_motion_replaces_walk_after_foot_loss() {
             sarx::BehavioralIntent::MoveForward,
             "Walk_Formal_Loop",
             {
+                "CMU_WalkWoundedLeg",
                 "CMU_Limp",
-                "CMU_HurtLegWalk",
-                "CMU_DragBadLegWalk"
+                "CMU_PainfulLeftKnee"
             },
             anatomy,
             physical);
@@ -2031,13 +2031,13 @@ void test_authored_injury_motion_replaces_walk_after_foot_loss() {
 
     const auto injury_viability =
         sarx::evaluate_motion_viability(
-            "CMU_HurtLegWalk",
+            "CMU_WalkWoundedLeg",
             anatomy);
 
     check(
         injury_viability.state
             != sarx::MotionViability::Invalid,
-        "authored injury gait should remain viable with one intact support leg");
+        "authored wounded-leg gait should remain viable with one intact support leg");
 
     const auto no_assets =
         sarx::plan_authored_injury_locomotion(
