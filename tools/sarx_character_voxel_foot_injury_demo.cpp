@@ -496,7 +496,12 @@ int main(int argc, char** argv) {
         double max_authored_pose_rms = 0.0;
         double max_floor_projection = 0.0;
         double max_camera_tracking_error = 0.0;
+        double min_head_above_pelvis =
+            std::numeric_limits<double>::infinity();
+
         std::size_t right_support_contacts = 0;
+        std::size_t authored_evaluated_frames = 0;
+        std::size_t authored_grounded_frames = 0;
 
         sarx::Vec3 previous_camera_target{};
         sarx::Vec3 previous_camera_world_offset{};
@@ -991,6 +996,9 @@ int main(int argc, char** argv) {
                 }
             }
 
+            std::size_t
+                right_support_contacts_this_frame = 0;
+
             for (std::size_t i = 0;
                  i < voxel_character.voxels().size();
                  ++i) {
@@ -1006,6 +1014,66 @@ int main(int argc, char** argv) {
                         <= args.voxel_size * 1.3) {
 
                     ++right_support_contacts;
+                    ++right_support_contacts_this_frame;
+                }
+            }
+
+            if (authored_pose_engaged_frame >= 0
+                && frame >= authored_pose_engaged_frame) {
+
+                ++authored_evaluated_frames;
+
+                if (right_support_contacts_this_frame > 0) {
+                    ++authored_grounded_frames;
+                }
+
+                sarx::Vec3 pelvis_center{};
+                sarx::Vec3 head_center{};
+                std::size_t pelvis_count = 0;
+                std::size_t head_count = 0;
+
+                for (std::size_t i = 0;
+                     i < voxel_character.voxels().size();
+                     ++i) {
+
+                    const auto& voxel =
+                        voxel_character.voxels()[i];
+
+                    if (voxel.state
+                        != sarx::CharacterVoxelState::Attached) {
+                        continue;
+                    }
+
+                    if (voxel.anatomical_region
+                        == "pelvis") {
+                        pelvis_center += voxel_centers[i];
+                        ++pelvis_count;
+                    } else if (
+                        voxel.anatomical_region
+                        == "Head") {
+                        head_center += voxel_centers[i];
+                        ++head_count;
+                    }
+                }
+
+                if (pelvis_count > 0
+                    && head_count > 0) {
+
+                    pelvis_center =
+                        pelvis_center
+                        / static_cast<double>(
+                            pelvis_count);
+
+                    head_center =
+                        head_center
+                        / static_cast<double>(
+                            head_count);
+
+                    min_head_above_pelvis =
+                        std::min(
+                            min_head_above_pelvis,
+                            head_center.y
+                            - pelvis_center.y);
                 }
             }
 
@@ -1132,6 +1200,29 @@ int main(int argc, char** argv) {
                 "authored injury motion never became visible authority");
         }
 
+        if (args.require_limp
+            && (!std::isfinite(
+                    min_head_above_pelvis)
+                || min_head_above_pelvis < 0.20)) {
+            throw std::runtime_error(
+                "authored injury motion lost upright torso orientation: "
+                + std::to_string(
+                    min_head_above_pelvis));
+        }
+
+        if (args.require_limp
+            && (authored_evaluated_frames == 0
+                || authored_grounded_frames * 5
+                    < authored_evaluated_frames)) {
+            throw std::runtime_error(
+                "authored injury motion lost sustained intact-foot support: "
+                + std::to_string(
+                    authored_grounded_frames)
+                + "/"
+                + std::to_string(
+                    authored_evaluated_frames));
+        }
+
         if (args.require_isolated_foot
             && unrelated_changed_voxels != 0) {
             throw std::runtime_error(
@@ -1194,6 +1285,12 @@ int main(int argc, char** argv) {
                 : 0)
             << " right_support_contacts="
             << right_support_contacts
+            << " authored_grounded_frames="
+            << authored_grounded_frames
+            << " authored_evaluated_frames="
+            << authored_evaluated_frames
+            << " min_head_above_pelvis="
+            << min_head_above_pelvis
             << " max_authored_pose_rms="
             << max_authored_pose_rms
             << " max_floor_projection="
