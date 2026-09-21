@@ -138,15 +138,117 @@ Vec3 midpoint(const Vec3& a, const Vec3& b) {
     return (a + b) * 0.5;
 }
 
+double signed_tetra_volume(
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& d) {
+    return dot(b - a, cross(c - a, d - a)) / 6.0;
+}
+
+bool point_in_tetra(
+    const Vec3& p,
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& d) {
+
+    const double total = signed_tetra_volume(a, b, c, d);
+    if (std::abs(total) <= 1e-12) return false;
+
+    const double w0 = signed_tetra_volume(p, b, c, d) / total;
+    const double w1 = signed_tetra_volume(a, p, c, d) / total;
+    const double w2 = signed_tetra_volume(a, b, p, d) / total;
+    const double w3 = signed_tetra_volume(a, b, c, p) / total;
+    constexpr double eps = 1e-9;
+
+    return w0 >= -eps && w1 >= -eps && w2 >= -eps && w3 >= -eps
+        && w0 <= 1.0 + eps && w1 <= 1.0 + eps
+        && w2 <= 1.0 + eps && w3 <= 1.0 + eps;
+}
+
+bool segment_triangle_intersection(
+    const Vec3& p,
+    const Vec3& q,
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    Vec3& hit) {
+
+    constexpr double eps = 1e-10;
+    const Vec3 dir = q - p;
+    const Vec3 e1 = b - a;
+    const Vec3 e2 = c - a;
+    const Vec3 h = cross(dir, e2);
+    const double det = dot(e1, h);
+
+    if (std::abs(det) <= eps) return false;
+
+    const double inv_det = 1.0 / det;
+    const Vec3 s = p - a;
+    const double u = dot(s, h) * inv_det;
+    if (u < -eps || u > 1.0 + eps) return false;
+
+    const Vec3 qv = cross(s, e1);
+    const double v = dot(dir, qv) * inv_det;
+    if (v < -eps || u + v > 1.0 + eps) return false;
+
+    const double t = dot(e2, qv) * inv_det;
+    if (t < -eps || t > 1.0 + eps) return false;
+
+    hit = p + dir * std::clamp(t, 0.0, 1.0);
+    return true;
+}
+
+bool segment_tetra_intersection(
+    const Vec3& p,
+    const Vec3& q,
+    const Vec3& a,
+    const Vec3& b,
+    const Vec3& c,
+    const Vec3& d,
+    Vec3& hit) {
+
+    if (point_in_tetra(p, a, b, c, d)) {
+        hit = p;
+        return true;
+    }
+    if (point_in_tetra(q, a, b, c, d)) {
+        hit = q;
+        return true;
+    }
+
+    const std::array<std::array<Vec3, 3>, 4> faces{{
+        {a, b, c},
+        {a, b, d},
+        {a, c, d},
+        {b, c, d}
+    }};
+
+    for (const auto& face : faces) {
+        if (segment_triangle_intersection(
+                p, q, face[0], face[1], face[2], hit)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 DamageCandidates all_candidates(const Body& body) {
     DamageCandidates candidates;
     candidates.structural.reserve(body.structural_constraints().size());
+    candidates.tetrahedral.reserve(body.tetrahedral_constraints().size());
     candidates.attachments.reserve(body.attachments().size());
     candidates.bone_joints.reserve(body.bones().size());
 
     for (ConstraintId id = 0; id < body.structural_constraints().size(); ++id) {
         if (body.structural_constraints()[id].active) {
             candidates.structural.push_back(id);
+        }
+    }
+    for (ConstraintId id = 0; id < body.tetrahedral_constraints().size(); ++id) {
+        if (body.tetrahedral_constraints()[id].active) {
+            candidates.tetrahedral.push_back(id);
         }
     }
     for (ConstraintId id = 0; id < body.attachments().size(); ++id) {
@@ -211,7 +313,10 @@ MaterialResponse MaterialTable::get(MaterialId material) const {
 }
 
 std::size_t DamageCandidates::size() const {
-    return structural.size() + attachments.size() + bone_joints.size();
+    return structural.size()
+        + tetrahedral.size()
+        + attachments.size()
+        + bone_joints.size();
 }
 
 std::size_t DamageReport::broken_count() const {
@@ -289,6 +394,46 @@ DamageReport DamageSystem::apply_capsule(
             midpoint(hit.point_a, hit.point_b),
             amount,
             broke);
+    }
+
+    if (damage.mode == DamageMode::Cut) {
+        const auto tetra_snapshot = body.tetrahedral_constraints();
+        for (ConstraintId id : candidates.tetrahedral) {
+            if (id >= tetra_snapshot.size()) continue;
+            const auto& t = tetra_snapshot[id];
+            if (!t.active) continue;
+
+            const Vec3 p0 = body.particles()[t.a].position;
+            const Vec3 p1 = body.particles()[t.b].position;
+            const Vec3 p2 = body.particles()[t.c].position;
+            const Vec3 p3 = body.particles()[t.d].position;
+
+            Vec3 hit{};
+            if (!segment_tetra_intersection(
+                    damage.a, damage.b, p0, p1, p2, p3, hit)) {
+                continue;
+            }
+
+            const auto material = materials_.get(t.material);
+            const double amount = damage.energy / material.cut_resistance;
+            if (amount <= 0.0) continue;
+
+            const bool was_active = t.active;
+            body.damage_tetrahedral(id, amount);
+            const bool broke =
+                was_active && !body.tetrahedral_constraints()[id].active;
+
+            append_event(
+                report,
+                damage.event_id,
+                DamageSource::Spatial,
+                DamageTargetKind::TetrahedralConstraint,
+                id,
+                t.material,
+                hit,
+                amount,
+                broke);
+        }
     }
 
     const auto attachment_snapshot = body.attachments();
