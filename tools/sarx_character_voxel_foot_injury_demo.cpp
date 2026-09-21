@@ -489,6 +489,7 @@ int main(int argc, char** argv) {
         int walk_invalidated_frame = -1;
         int injury_selected_frame = -1;
         int authored_pose_engaged_frame = -1;
+        int gait_ready_frame = -1;
 
         bool normal_walk_authority = true;
 
@@ -507,8 +508,14 @@ int main(int argc, char** argv) {
         sarx::Vec3 transition_lateral_axis{};
         sarx::Vec3 inherited_root_velocity{};
         sarx::Vec3 injury_hold_end_world_offset{};
+        sarx::Vec3 gait_ready_world_offset{};
         sarx::Vec3 current_body_world_offset =
             world_offset_for(0);
+
+        double authored_root_start_distance = 0.0;
+        double authored_root_start_vertical = 0.0;
+        double support_height_drop = 0.0;
+        double max_pre_gait_commanded_travel = 0.0;
 
         double max_authored_pose_rms = 0.0;
         double max_floor_projection = 0.0;
@@ -904,6 +911,40 @@ int main(int argc, char** argv) {
                     injury_initial_core_center =
                         core_centroid(
                             injury_initial_centers);
+
+                    double initial_stump_min_y =
+                        std::numeric_limits<double>::infinity();
+
+                    for (std::size_t i = 0;
+                         i < voxel_character.voxels().size();
+                         ++i) {
+
+                        const auto& voxel =
+                            voxel_character.voxels()[i];
+
+                        if (voxel.state
+                                == sarx::CharacterVoxelState::Attached
+                            && voxel.anatomical_region
+                                == "calf_l") {
+
+                            initial_stump_min_y =
+                                std::min(
+                                    initial_stump_min_y,
+                                    injury_initial_centers[i].y);
+                        }
+                    }
+
+                    const double stump_target_center_y =
+                        args.voxel_size * 0.72;
+
+                    support_height_drop =
+                        std::isfinite(initial_stump_min_y)
+                        ? std::clamp(
+                            initial_stump_min_y
+                                - stump_target_center_y,
+                            0.0,
+                            0.09)
+                        : 0.0;
                 }
             }
 
@@ -941,17 +982,32 @@ int main(int argc, char** argv) {
                         transition_world_offset
                         + inherited_root_velocity
                             * brake_distance_scale;
+                } else if (gait_ready_frame < 0) {
+                    // The authored pose may already be playing, but SARX
+                    // does not grant translational authority until a real
+                    // intact-leg step cycle is observed.
+                    current_body_world_offset =
+                        injury_hold_end_world_offset;
+
+                    max_pre_gait_commanded_travel =
+                        std::max(
+                            max_pre_gait_commanded_travel,
+                            sarx::length(
+                                current_body_world_offset
+                                - injury_hold_end_world_offset));
                 } else {
                     const auto root_motion =
                         injury_root_motion.sample(
                             authored_time);
 
                     current_body_world_offset =
-                        injury_hold_end_world_offset
+                        gait_ready_world_offset
                         + sarx::Vec3{
                             0.0,
-                            root_motion.vertical_m,
+                            root_motion.vertical_m
+                                - authored_root_start_vertical,
                             root_motion.distance_m
+                                - authored_root_start_distance
                         };
                 }
 
@@ -1074,6 +1130,49 @@ int main(int argc, char** argv) {
                             - carried_source);
 
                     ++pose_count;
+                }
+
+                // Missing-foot support-height compensation. This is not a
+                // synthesized gait: the authored mocap still owns the pose.
+                // SARX lowers the surviving body to account for the removed
+                // distal segment, while progressively preserving the intact
+                // leg's planted endpoint so the right foot does not sink
+                // through the floor.
+                const double applied_support_drop =
+                    support_height_drop * blend;
+
+                if (applied_support_drop > 0.0) {
+                    for (std::size_t i = 0;
+                         i < voxel_centers.size();
+                         ++i) {
+
+                        const auto& voxel =
+                            voxel_character.voxels()[i];
+
+                        if (voxel.state
+                            != sarx::CharacterVoxelState::Attached) {
+                            continue;
+                        }
+
+                        double preserve = 0.0;
+
+                        if (voxel.anatomical_region
+                            == "thigh_r") {
+                            preserve = 0.30;
+                        } else if (
+                            voxel.anatomical_region
+                            == "calf_r") {
+                            preserve = 0.68;
+                        } else if (
+                            voxel.anatomical_region
+                            == "foot_r") {
+                            preserve = 1.0;
+                        }
+
+                        voxel_centers[i].y -=
+                            applied_support_drop
+                            * (1.0 - preserve);
+                    }
                 }
 
                 double attached_min_y =
@@ -1404,6 +1503,38 @@ int main(int argc, char** argv) {
                                     relative_l
                                     - authored_reference_calf_l));
                     }
+
+                    const double handoff_time_now =
+                        injury_selected_frame >= 0
+                        ? static_cast<double>(
+                            frame - injury_selected_frame)
+                            / args.fps
+                        : 0.0;
+
+                    if (gait_ready_frame < 0
+                        && authored_pose_engaged_frame >= 0
+                        && handoff_time_now >= 0.50
+                        && max_right_leg_cycle >= 0.15) {
+
+                        gait_ready_frame = frame;
+                        gait_ready_world_offset =
+                            current_body_world_offset;
+
+                        const double authored_time_now =
+                            std::max(
+                                0.0,
+                                handoff_time_now - 0.25);
+
+                        const auto root_start =
+                            injury_root_motion.sample(
+                                authored_time_now);
+
+                        authored_root_start_distance =
+                            root_start.distance_m;
+
+                        authored_root_start_vertical =
+                            root_start.vertical_m;
+                    }
                 }
             }
 
@@ -1517,6 +1648,12 @@ int main(int argc, char** argv) {
             << min_stump_center_y
             << " stump_near_ground_frames="
             << stump_near_ground_frames
+            << " gait_ready_frame="
+            << gait_ready_frame
+            << " support_height_drop="
+            << support_height_drop
+            << " pre_gait_commanded_travel="
+            << max_pre_gait_commanded_travel
             << " grounded_frames="
             << authored_grounded_frames
             << "/"
@@ -1600,13 +1737,37 @@ int main(int argc, char** argv) {
         }
 
         if (args.require_limp
+            && gait_ready_frame < 0) {
+            throw std::runtime_error(
+                "authored injury motion never produced a valid intact-leg step cycle");
+        }
+
+        if (args.require_limp
+            && max_pre_gait_commanded_travel > 1e-9) {
+            throw std::runtime_error(
+                "root translation began before authored gait readiness: "
+                + std::to_string(
+                    max_pre_gait_commanded_travel));
+        }
+
+        if (args.require_limp
             && (!std::isfinite(
                     min_stump_center_y)
-                || stump_near_ground_frames == 0)) {
+                || min_stump_center_y
+                    > args.voxel_size * 0.90
+                || authored_evaluated_frames == 0
+                || stump_near_ground_frames * 5
+                    < authored_evaluated_frames)) {
             throw std::runtime_error(
-                "amputation stump never approaches the ground: "
+                "amputation stump lacks sustained support-height contact: "
                 + std::to_string(
-                    min_stump_center_y));
+                    min_stump_center_y)
+                + " frames="
+                + std::to_string(
+                    stump_near_ground_frames)
+                + "/"
+                + std::to_string(
+                    authored_evaluated_frames));
         }
 
         if (args.require_isolated_foot
@@ -1687,6 +1848,12 @@ int main(int argc, char** argv) {
             << max_right_leg_cycle
             << " max_left_leg_cycle="
             << max_left_leg_cycle
+            << " gait_ready_frame="
+            << gait_ready_frame
+            << " support_height_drop="
+            << support_height_drop
+            << " pre_gait_commanded_travel="
+            << max_pre_gait_commanded_travel
             << " authored_root_distance_m="
             << injury_root_motion.total_distance_m()
             << " max_authored_pose_rms="
