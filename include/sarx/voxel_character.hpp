@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace sarx {
@@ -17,8 +18,8 @@ enum class CharacterVoxelState : std::uint8_t {
 
 struct CharacterVoxel {
     Vec3 rest_center{};
-    Vec3 anchor_offset{};
-    std::size_t anchor_vertex{};
+    CharacterPointBinding skin_binding{};
+    std::string anatomical_region{"other"};
     int grid_x{};
     int grid_y{};
     int grid_z{};
@@ -29,6 +30,20 @@ struct CharacterVoxel {
 
 struct DetachedVoxelComponent {
     std::vector<std::size_t> voxel_indices;
+    std::string anatomical_region;
+};
+
+struct AnatomicalAvailability {
+    std::string region;
+    std::size_t total_voxels{};
+    std::size_t attached_voxels{};
+
+    [[nodiscard]] double attached_fraction() const {
+        return total_voxels > 0
+            ? static_cast<double>(attached_voxels)
+                / static_cast<double>(total_voxels)
+            : 1.0;
+    }
 };
 
 struct VoxelizedCharacterStats {
@@ -43,61 +58,63 @@ struct VoxelizedCharacterStats {
 class VoxelizedCharacter {
 public:
     void build(
-        const CharacterMeshFrame& rest_mesh,
+        const GltfCharacter& character,
+        std::size_t animation,
+        double binding_time_seconds,
         double voxel_size = 0.055);
 
+    [[nodiscard]] std::vector<Vec3> sample_centers(
+        const GltfCharacter& character,
+        std::size_t animation,
+        double time_seconds,
+        bool loop = true,
+        const Vec3& world_offset = {}) const;
+
     [[nodiscard]] CharacterMeshFrame render(
-        const CharacterMeshFrame& animated_mesh) const;
+        const std::vector<Vec3>& world_centers) const;
 
     [[nodiscard]] CharacterMeshFrame render_component(
         const DetachedVoxelComponent& component,
         const std::vector<Vec3>& world_centers) const;
 
     std::size_t damage_sphere(
-        const CharacterMeshFrame& animated_mesh,
+        const std::vector<Vec3>& world_centers,
         const Vec3& center,
         double radius,
-        double damage = 1.0);
+        double damage = 1.0,
+        const std::vector<std::string>& allowed_regions = {});
 
     std::size_t damage_cut_disk(
-        const CharacterMeshFrame& animated_mesh,
+        const std::vector<Vec3>& world_centers,
         const Vec3& center,
         const Vec3& normal,
         double half_thickness,
         double radius,
-        double damage = 1.0);
+        double damage = 1.0,
+        const std::vector<std::string>& allowed_regions = {});
 
     [[nodiscard]] std::optional<DetachedVoxelComponent>
-    detach_component_near(
-        const CharacterMeshFrame& animated_mesh,
-        const Vec3& seed_world_point,
-        std::size_t minimum_voxels = 4);
-
-    [[nodiscard]] std::optional<DetachedVoxelComponent>
-    detach_distal_region(
-        const CharacterMeshFrame& animated_mesh,
-        const Vec3& cut_center,
-        const Vec3& outward_normal,
-        const Vec3& seed_world_point,
-        double selection_radius,
-        double minimum_axial_offset,
+    detach_anatomical_region_if_disconnected(
+        const std::string& anatomical_region,
         std::size_t minimum_voxels = 4);
 
     [[nodiscard]] Vec3 voxel_center(
         std::size_t voxel_index,
-        const CharacterMeshFrame& animated_mesh) const;
+        const std::vector<Vec3>& world_centers) const;
 
     [[nodiscard]] VoxelizedCharacterStats stats() const;
+
+    [[nodiscard]] std::vector<AnatomicalAvailability>
+    anatomy_availability() const;
+
+    [[nodiscard]] double attached_fraction(
+        const std::string& anatomical_region) const;
 
     [[nodiscard]] const std::vector<CharacterVoxel>& voxels() const {
         return voxels_;
     }
 
 private:
-    [[nodiscard]] Vec3 current_center(
-        const CharacterVoxel& voxel,
-        const CharacterMeshFrame& animated_mesh) const;
-
     double voxel_size_{0.055};
     std::vector<CharacterVoxel> voxels_;
 };
