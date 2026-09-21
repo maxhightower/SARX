@@ -3,6 +3,7 @@
 #include "sarx/broad_phase.hpp"
 #include "sarx/volume.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
