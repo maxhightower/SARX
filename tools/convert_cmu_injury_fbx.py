@@ -291,12 +291,56 @@ def main():
         / float(scene.render.fps_base)
     )
 
-    root_samples = []
-    root_start = None
-    root_previous = None
-    root_distance = 0.0
-    min_vertical = 0.0
-    max_vertical = 0.0
+    def rest_world_position(armature, bone_name):
+        bone = armature.data.bones.get(bone_name)
+        if bone is None:
+            raise RuntimeError(
+                f"{armature.name} missing rest bone {bone_name}"
+            )
+        return (
+            armature.matrix_world
+            @ bone.matrix_local
+        ).translation.copy()
+
+    source_head_rest = rest_world_position(
+        source_armature,
+        "head",
+    )
+    source_foot_rest = (
+        rest_world_position(source_armature, "lFoot")
+        + rest_world_position(source_armature, "rFoot")
+    ) * 0.5
+
+    target_head_rest = rest_world_position(
+        target_armature,
+        "Head",
+    )
+    target_foot_rest = (
+        rest_world_position(target_armature, "foot_l")
+        + rest_world_position(target_armature, "foot_r")
+    ) * 0.5
+
+    source_height_units = (
+        source_head_rest
+        - source_foot_rest
+    ).length
+
+    target_height_m = (
+        target_head_rest
+        - target_foot_rest
+    ).length
+
+    if source_height_units <= 1e-9:
+        raise RuntimeError(
+            "CMU source skeleton height is degenerate"
+        )
+
+    root_unit_scale = (
+        target_height_m
+        / source_height_units
+    )
+
+    root_positions = []
 
     # Bake the authored source pose into the actual Quaternius target
     # coordinate frames. Target bone translations/lengths remain those
@@ -309,32 +353,15 @@ def main():
     for frame in range(source_start, source_end + 1):
         scene.frame_set(frame)
 
-        root_world = (
-            source_armature.matrix_world
-            @ source_root_pose.matrix
-        ).translation.copy()
-
-        if root_start is None:
-            root_start = root_world.copy()
-            root_previous = root_world.copy()
-
-        dx = root_world.x - root_previous.x
-        dy = root_world.y - root_previous.y
-        root_distance += (dx * dx + dy * dy) ** 0.5
-
-        vertical = root_world.z - root_start.z
-        min_vertical = min(min_vertical, vertical)
-        max_vertical = max(max_vertical, vertical)
-
-        root_samples.append(
+        root_positions.append(
             (
                 (frame - source_start) / source_fps,
-                root_distance,
-                vertical,
+                (
+                    source_armature.matrix_world
+                    @ source_root_pose.matrix
+                ).translation.copy(),
             )
         )
-
-        root_previous = root_world.copy()
 
         for source_name, target_name, source_to_target_basis, _ in mapped:
             source_pose = source_armature.pose.bones.get(source_name)
@@ -410,6 +437,118 @@ def main():
 
     strip_non_rotation_animation_channels(destination)
 
+    if len(root_positions) < 3:
+        raise RuntimeError(
+            "CMU authored motion has too few root samples"
+        )
+
+    horizontal_steps = []
+    for index in range(1, len(root_positions)):
+        previous = root_positions[index - 1][1]
+        current = root_positions[index][1]
+        dx = current.x - previous.x
+        dy = current.y - previous.y
+        horizontal_steps.append(
+            (dx * dx + dy * dy) ** 0.5
+        )
+
+    sorted_steps = sorted(horizontal_steps[1:])
+    median_step = (
+        sorted_steps[len(sorted_steps) // 2]
+        if sorted_steps
+        else 0.0
+    )
+
+    stable_start_index = 0
+
+    if (
+        len(horizontal_steps) >= 2
+        and median_step > 1e-9
+        and horizontal_steps[0]
+            > median_step * 8.0
+    ):
+        stable_start_index = 1
+
+    stable_start = root_positions[
+        stable_start_index
+    ][1]
+
+    end_root = root_positions[-1][1]
+
+    forward_x = end_root.x - stable_start.x
+    forward_y = end_root.y - stable_start.y
+    forward_length = (
+        forward_x * forward_x
+        + forward_y * forward_y
+    ) ** 0.5
+
+    if forward_length <= 1e-9:
+        # Fall back to the dominant early displacement rather than
+        # inventing movement if a clip is effectively in-place.
+        for index in range(
+            stable_start_index + 1,
+            len(root_positions),
+        ):
+            candidate = root_positions[index][1]
+            forward_x = candidate.x - stable_start.x
+            forward_y = candidate.y - stable_start.y
+            forward_length = (
+                forward_x * forward_x
+                + forward_y * forward_y
+            ) ** 0.5
+            if forward_length > median_step * 4.0:
+                break
+
+    if forward_length > 1e-9:
+        forward_x /= forward_length
+        forward_y /= forward_length
+    else:
+        forward_x = 0.0
+        forward_y = 0.0
+
+    root_samples = []
+    min_vertical = 0.0
+    max_vertical = 0.0
+
+    for time_seconds, root_world in root_positions:
+        dx = root_world.x - stable_start.x
+        dy = root_world.y - stable_start.y
+
+        distance_m = (
+            dx * forward_x
+            + dy * forward_y
+        ) * root_unit_scale
+
+        vertical_m = (
+            root_world.z
+            - stable_start.z
+        ) * root_unit_scale
+
+        # Before the stable motion origin, suppress the FBX bind-to-motion
+        # discontinuity instead of turning it into instantaneous travel.
+        if time_seconds < root_positions[
+            stable_start_index
+        ][0]:
+            distance_m = 0.0
+            vertical_m = 0.0
+
+        min_vertical = min(
+            min_vertical,
+            vertical_m,
+        )
+        max_vertical = max(
+            max_vertical,
+            vertical_m,
+        )
+
+        root_samples.append(
+            (
+                time_seconds,
+                distance_m,
+                vertical_m,
+            )
+        )
+
     root_path = destination.with_suffix(".root.csv")
     with root_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
@@ -422,11 +561,15 @@ def main():
         )
         writer.writerows(root_samples)
 
+    final_distance_m = root_samples[-1][1]
+
     print(
         "SARX_CMU_ROOT_TRAJECTORY",
         clip_name,
         f"samples={len(root_samples)}",
-        f"distance_m={root_distance:.9f}",
+        f"stable_start_index={stable_start_index}",
+        f"unit_scale={root_unit_scale:.9f}",
+        f"distance_m={final_distance_m:.9f}",
         f"vertical_min_m={min_vertical:.9f}",
         f"vertical_max_m={max_vertical:.9f}",
         f"path={root_path}",
