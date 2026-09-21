@@ -30,15 +30,29 @@ struct Bone {
     double joint_damage{0.0};
     double joint_break_damage{1.0};
     MaterialId joint_material{kDefaultMaterial};
+    double joint_radius{0.0};
 };
 
 struct StructuralConstraint {
     ParticleId a{};
     ParticleId b{};
     double rest_length{};
+    Vec3 rest_direction{};
     double compliance{0.0};
     double damage{0.0};
     double break_damage{1.0};
+    double lambda{0.0};
+    bool active{true};
+    MaterialId material{kDefaultMaterial};
+};
+
+struct TetrahedralConstraint {
+    ParticleId a{};
+    ParticleId b{};
+    ParticleId c{};
+    ParticleId d{};
+    double rest_volume{};
+    double compliance{0.0};
     double lambda{0.0};
     bool active{true};
     MaterialId material{kDefaultMaterial};
@@ -77,13 +91,22 @@ public:
         BoneId parent,
         const Vec3& animated_position,
         double joint_break_damage = 1.0,
-        MaterialId joint_material = kDefaultMaterial);
+        MaterialId joint_material = kDefaultMaterial,
+        double joint_radius = 0.0);
 
     ConstraintId add_structural_constraint(
         ParticleId a,
         ParticleId b,
         double compliance = 0.0,
         double break_damage = 1.0,
+        MaterialId material = kDefaultMaterial);
+
+    ConstraintId add_tetrahedral_constraint(
+        ParticleId a,
+        ParticleId b,
+        ParticleId c,
+        ParticleId d,
+        double compliance = 0.0,
         MaterialId material = kDefaultMaterial);
 
     ConstraintId add_attachment(
@@ -101,6 +124,7 @@ public:
     void damage_bone_joint(BoneId bone, double amount);
 
     void break_structural(ConstraintId constraint);
+    void break_tetrahedral(ConstraintId constraint);
     void break_attachment(ConstraintId constraint);
     void break_bone_joint(BoneId bone);
 
@@ -114,15 +138,18 @@ public:
     [[nodiscard]] std::vector<Particle>& particles() { return particles_; }
     [[nodiscard]] const std::vector<Bone>& bones() const { return bones_; }
     [[nodiscard]] const std::vector<StructuralConstraint>& structural_constraints() const { return structural_; }
+    [[nodiscard]] const std::vector<TetrahedralConstraint>& tetrahedral_constraints() const { return tetrahedral_; }
     [[nodiscard]] const std::vector<AttachmentConstraint>& attachments() const { return attachments_; }
 
 private:
     void solve_structural(double h);
+    void solve_tetrahedral(double h);
     void solve_attachments(double h);
 
     std::vector<Particle> particles_;
     std::vector<Bone> bones_;
     std::vector<StructuralConstraint> structural_;
+    std::vector<TetrahedralConstraint> tetrahedral_;
     std::vector<AttachmentConstraint> attachments_;
 };
 
