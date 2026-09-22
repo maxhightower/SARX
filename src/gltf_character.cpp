@@ -1632,6 +1632,138 @@ GltfCharacter::sample_with_node_local_poses(
     return frame;
 }
 
+Vec3 GltfCharacter::node_world_position_with_local_poses(
+    const std::vector<CharacterNodeLocalPose>& node_poses,
+    const std::string& joint_fragment,
+    const Vec3& world_offset) const {
+
+    std::vector<NodePose> poses =
+        impl_->rest_nodes;
+
+    for (const auto& override_pose
+         : node_poses) {
+
+        const auto found =
+            impl_->node_by_name.find(
+                lower_copy(
+                    override_pose.name));
+
+        if (found
+            == impl_->node_by_name.end()) {
+            continue;
+        }
+
+        const int index =
+            found->second;
+
+        if (index < 0
+            || static_cast<std::size_t>(
+                   index)
+                >= poses.size()) {
+            continue;
+        }
+
+        NodePose& pose =
+            poses[
+                static_cast<std::size_t>(
+                    index)];
+
+        pose.matrix_mode = false;
+        pose.translation =
+            override_pose.translation;
+
+        pose.rotation = {
+            override_pose.rotation[0],
+            override_pose.rotation[1],
+            override_pose.rotation[2],
+            override_pose.rotation[3]
+        };
+
+        pose.scale =
+            override_pose.scale;
+    }
+
+    std::vector<Mat4> globals(
+        poses.size(),
+        identity());
+
+    std::vector<std::uint8_t> state(
+        poses.size(),
+        0u);
+
+    const auto compute_global =
+        [&](auto&& self,
+            std::size_t index) -> const Mat4& {
+
+        if (state[index] == 2u) {
+            return globals[index];
+        }
+
+        if (state[index] == 1u) {
+            throw std::runtime_error(
+                "cycle in character node hierarchy");
+        }
+
+        state[index] = 1u;
+
+        const NodePose& pose =
+            poses[index];
+
+        const Mat4 local =
+            pose.matrix_mode
+            ? pose.matrix
+            : trs(
+                pose.translation,
+                pose.rotation,
+                pose.scale);
+
+        if (pose.parent >= 0) {
+            globals[index] =
+                multiply(
+                    self(
+                        self,
+                        static_cast<std::size_t>(
+                            pose.parent)),
+                    local);
+        } else {
+            globals[index] =
+                local;
+        }
+
+        state[index] = 2u;
+        return globals[index];
+    };
+
+    for (std::size_t i = 0;
+         i < poses.size();
+         ++i) {
+        (void)compute_global(
+            compute_global,
+            i);
+    }
+
+    const int joint =
+        resolve_joint_fragment(
+            impl_->rest_nodes,
+            joint_fragment);
+
+    if (joint < 0
+        || static_cast<std::size_t>(
+               joint)
+            >= globals.size()) {
+        throw std::out_of_range(
+            "joint not found for composed pose: "
+            + joint_fragment);
+    }
+
+    return transform_point(
+        globals[
+            static_cast<std::size_t>(
+                joint)],
+        {})
+        + world_offset;
+}
+
 CharacterMeshFrame GltfCharacter::sample(
     std::size_t animation,
     double time_seconds,
