@@ -2327,6 +2327,170 @@ GltfCharacter::sample_bound_points(
     return points;
 }
 
+std::vector<Vec3>
+GltfCharacter::sample_bound_points_with_node_local_poses(
+    const std::vector<CharacterPointBinding>& bindings,
+    const std::vector<CharacterNodeLocalPose>& node_poses,
+    const Vec3& world_offset) const {
+
+    std::vector<NodePose> poses =
+        impl_->rest_nodes;
+
+    for (const auto& override_pose
+         : node_poses) {
+
+        const auto found =
+            impl_->node_by_name.find(
+                lower_copy(
+                    override_pose.name));
+
+        if (found
+            == impl_->node_by_name.end()) {
+            continue;
+        }
+
+        const int index =
+            found->second;
+
+        if (index < 0
+            || static_cast<std::size_t>(
+                   index)
+                >= poses.size()) {
+            continue;
+        }
+
+        NodePose& pose =
+            poses[
+                static_cast<std::size_t>(
+                    index)];
+
+        pose.matrix_mode = false;
+        pose.translation =
+            override_pose.translation;
+
+        pose.rotation = {
+            override_pose.rotation[0],
+            override_pose.rotation[1],
+            override_pose.rotation[2],
+            override_pose.rotation[3]
+        };
+
+        pose.scale =
+            override_pose.scale;
+    }
+
+    std::vector<Mat4> globals(
+        poses.size(),
+        identity());
+
+    std::vector<std::uint8_t> state(
+        poses.size(),
+        0u);
+
+    const auto compute_global =
+        [&](auto&& self,
+            std::size_t index) -> const Mat4& {
+
+        if (state[index] == 2u) {
+            return globals[index];
+        }
+
+        if (state[index] == 1u) {
+            throw std::runtime_error(
+                "cycle in character node hierarchy");
+        }
+
+        state[index] = 1u;
+
+        const NodePose& pose =
+            poses[index];
+
+        const Mat4 local =
+            pose.matrix_mode
+            ? pose.matrix
+            : trs(
+                pose.translation,
+                pose.rotation,
+                pose.scale);
+
+        if (pose.parent >= 0) {
+            globals[index] =
+                multiply(
+                    self(
+                        self,
+                        static_cast<std::size_t>(
+                            pose.parent)),
+                    local);
+        } else {
+            globals[index] =
+                local;
+        }
+
+        state[index] = 2u;
+        return globals[index];
+    };
+
+    for (std::size_t i = 0;
+         i < poses.size();
+         ++i) {
+        (void)compute_global(
+            compute_global,
+            i);
+    }
+
+    std::vector<Vec3> points;
+    points.reserve(
+        bindings.size());
+
+    for (const auto& binding
+         : bindings) {
+
+        Vec3 point{};
+        double total = 0.0;
+
+        for (std::size_t i = 0;
+             i < binding.influence_count;
+             ++i) {
+
+            const auto& influence =
+                binding.influences[i];
+
+            if (influence.joint_node < 0
+                || static_cast<std::size_t>(
+                       influence.joint_node)
+                    >= globals.size()
+                || influence.weight <= 1e-12) {
+                continue;
+            }
+
+            point +=
+                transform_point(
+                    globals[
+                        static_cast<std::size_t>(
+                            influence.joint_node)],
+                    influence.joint_local_point)
+                * influence.weight;
+
+            total += influence.weight;
+        }
+
+        if (total <= 1e-12) {
+            throw std::runtime_error(
+                "bound character point has no valid composed-pose influence");
+        }
+
+        if (std::abs(total - 1.0)
+            > 1e-8) {
+            point = point / total;
+        }
+
+        points.push_back(
+            point + world_offset);
+    }
+
+    return points;
+}
+
 double GltfCharacter::binding_branch_weight(
     const CharacterPointBinding& binding,
     const std::string& root_joint_fragment) const {
