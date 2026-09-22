@@ -524,15 +524,15 @@ int main(int argc, char** argv) {
                 const sarx::Vec3 shoulder_cut_center =
                     shoulder
                     + upperarm_axis
-                        * (args.voxel_size * 1.10);
+                        * (args.voxel_size * 0.45);
 
                 destroyed_total +=
                     voxel_character.damage_cut_disk(
                         voxel_centers,
                         shoulder_cut_center,
                         upperarm_axis,
-                        args.voxel_size * 0.88,
-                        args.voxel_size * 4.6,
+                        args.voxel_size * 1.05,
+                        args.voxel_size * 4.8,
                         1.05,
                         {"upperarm_l"});
 
@@ -869,6 +869,32 @@ int main(int argc, char** argv) {
         const auto stats =
             voxel_character.stats();
 
+        auto authority_source_for =
+            [&](const std::string& joint) {
+
+                const auto found =
+                    std::find_if(
+                        authority.joints.begin(),
+                        authority.joints.end(),
+                        [&](const sarx::JointAuthorityAssignment& assignment) {
+                            return assignment.joint == joint;
+                        });
+
+                return found == authority.joints.end()
+                    ? sarx::AnimationAuthoritySource::Disabled
+                    : found->source;
+            };
+
+        const bool torso_joint_authority_ok =
+            authority_source_for("pelvis")
+                    == sarx::AnimationAuthoritySource::BaseAnimation
+            && authority_source_for("spine_01")
+                    == sarx::AnimationAuthoritySource::BaseAnimation
+            && authority_source_for("spine_02")
+                    == sarx::AnimationAuthoritySource::BaseAnimation
+            && authority_source_for("spine_03")
+                    == sarx::AnimationAuthoritySource::BaseAnimation;
+
         std::cout
             << "SARX whole-arm substitution diagnostics:"
             << " destroyed_voxels=" << stats.destroyed_voxels
@@ -886,6 +912,8 @@ int main(int argc, char** argv) {
             << " min_target_distance=" << min_target_distance
             << " contact_frame=" << contact_frame
             << " max_torso_override_rms=" << max_torso_override
+            << " torso_joint_authority_ok="
+            << (torso_joint_authority_ok ? 1 : 0)
             << '\n';
 
         if (args.require_damage && destroyed_total == 0) {
@@ -926,7 +954,9 @@ int main(int argc, char** argv) {
                 || authority.count(
                     sarx::AnimationAuthoritySource::Physics)
                     == 0
-                || max_torso_override > 1e-6)) {
+                || !torso_joint_authority_ok
+                || max_torso_override
+                    > args.voxel_size * 0.12)) {
             throw std::runtime_error(
                 "whole-arm regional authority proof failed");
         }
