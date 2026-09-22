@@ -1,5 +1,8 @@
 #include "sarx/action_capability.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 namespace sarx {
 
 ActionCapability make_hand_punch_capability(
@@ -135,6 +138,71 @@ ActionCapability make_elbow_strike_capability(
     capability.contact_phase_end = 0.85;
 
     return capability;
+}
+
+ActionCapability describe_authored_action(
+    const std::string& motion_id) {
+
+    std::string lower = motion_id;
+
+    std::transform(
+        lower.begin(),
+        lower.end(),
+        lower.begin(),
+        [](unsigned char value) {
+            return static_cast<char>(
+                std::tolower(value));
+        });
+
+    if (lower.find("punch_jab")
+        != std::string::npos) {
+
+        auto capability =
+            make_hand_punch_capability(
+                motion_id,
+                ActionSide::Left);
+
+        // Measured from the real Quaternius asset by
+        // sarx_character_action_audit at 60 Hz:
+        // max left-hand extension is near normalized phase 0.327.
+        capability.contact_phase_begin = 0.24;
+        capability.contact_phase_end = 0.40;
+
+        return capability;
+    }
+
+    if (lower.find("punch_cross")
+        != std::string::npos) {
+
+        auto capability =
+            make_hand_punch_capability(
+                motion_id,
+                ActionSide::Right);
+
+        // Measured max right-hand extension is near phase 0.267.
+        capability.contact_phase_begin = 0.18;
+        capability.contact_phase_end = 0.36;
+
+        return capability;
+    }
+
+    if (lower.find("elbow")
+        != std::string::npos) {
+
+        const ActionSide side =
+            lower.find("left")
+                    != std::string::npos
+                || lower.find("_l")
+                    != std::string::npos
+            ? ActionSide::Left
+            : ActionSide::Right;
+
+        return make_elbow_strike_capability(
+            motion_id,
+            side);
+    }
+
+    return ActionCapability{};
 }
 
 MotionViabilityResult evaluate_action_viability(
