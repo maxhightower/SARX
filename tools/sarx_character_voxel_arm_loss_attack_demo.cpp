@@ -339,6 +339,22 @@ double torso_override_rms(
         : 0.0;
 }
 
+sarx::Vec3 normalized_or_throw(
+    const sarx::Vec3& value,
+    const char* label) {
+
+    const double magnitude =
+        sarx::length(value);
+
+    if (magnitude <= 1e-9) {
+        throw std::runtime_error(
+            std::string(label)
+            + " has zero magnitude");
+    }
+
+    return value / magnitude;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
