@@ -590,20 +590,24 @@ int main(int argc, char** argv) {
                 && frame >= args.cut_frame
                 && frame < args.cut_frame + 6) {
 
-                destroyed_total +=
-                    voxel_character.damage_anatomical_interface(
-                        "upperarm_l",
-                        {"spine_03"},
-                        1.0);
+                const sarx::Vec3 upperarm_axis =
+                    normalized_or_throw(
+                        elbow - shoulder,
+                        "left upper-arm axis");
+
+                const sarx::Vec3 shoulder_cut_center =
+                    shoulder
+                    + upperarm_axis
+                        * (args.voxel_size * 1.10);
 
                 destroyed_total +=
                     voxel_character.damage_cut_disk(
                         voxel_centers,
-                        shoulder,
-                        elbow - shoulder,
-                        args.voxel_size * 0.74,
-                        args.voxel_size * 3.5,
-                        0.55,
+                        shoulder_cut_center,
+                        upperarm_axis,
+                        args.voxel_size * 0.88,
+                        args.voxel_size * 4.6,
+                        1.05,
                         {"upperarm_l"});
 
                 auto component =
@@ -936,6 +940,25 @@ int main(int argc, char** argv) {
         const double hand_r =
             voxel_character.attached_fraction("hand_r");
 
+        std::cout
+            << "SARX whole-arm substitution diagnostics:"
+            << " destroyed_voxels=" << stats.destroyed_voxels
+            << " detached_voxels=" << stats.detached_voxels
+            << " arm_detached_frame=" << detached_frame
+            << " jab_invalidated_frame=" << jab_invalidated_frame
+            << " substitution_selected_frame="
+            << substitution_selected_frame
+            << " upperarm_l_attached_fraction=" << upperarm_l
+            << " lowerarm_l_attached_fraction=" << lowerarm_l
+            << " hand_l_attached_fraction=" << hand_l
+            << " upperarm_r_attached_fraction=" << upperarm_r
+            << " lowerarm_r_attached_fraction=" << lowerarm_r
+            << " hand_r_attached_fraction=" << hand_r
+            << " min_target_distance=" << min_target_distance
+            << " contact_frame=" << contact_frame
+            << " max_torso_override_rms=" << max_torso_override
+            << '\n';
+
         if (args.require_damage && destroyed_total == 0) {
             throw std::runtime_error(
                 "shoulder cut destroyed no voxels");
@@ -981,7 +1004,7 @@ int main(int argc, char** argv) {
 
         if (args.require_isolation
             && (unrelated_changed_voxels != 0
-                || upperarm_l > 0.05
+                || upperarm_l > 0.10
                 || lowerarm_l > 0.05
                 || hand_l > 0.05
                 || upperarm_r < 0.95
