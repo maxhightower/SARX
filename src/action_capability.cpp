@@ -31,11 +31,11 @@ ActionCapability make_hand_punch_capability(
             {"lowerarm_r", 0.35}
         };
 
+        // A punch is not an isolated arm gesture. When it is selected as
+        // a replacement action, its authored torso twist must come with it.
+        // Physics-owned severed branches still override descendants.
         capability.authority_joint_roots = {
-            "clavicle_l",
-            "upperarm_l",
-            "lowerarm_l",
-            "hand_l"
+            "spine_01"
         };
 
         capability.contact_regions = {
@@ -61,11 +61,10 @@ ActionCapability make_hand_punch_capability(
             {"lowerarm_l", 0.35}
         };
 
+        // Opposite-hand punch substitution needs the authored torso
+        // mechanics as well as the striking arm. Pelvis/legs remain base.
         capability.authority_joint_roots = {
-            "clavicle_r",
-            "upperarm_r",
-            "lowerarm_r",
-            "hand_r"
+            "spine_01"
         };
 
         capability.contact_regions = {
