@@ -103,6 +103,11 @@ public:
         const std::vector<CharacterNodeLocalPose>& node_poses,
         const Vec3& world_offset = {}) const;
 
+    [[nodiscard]] Vec3 node_world_position_with_local_poses(
+        const std::vector<CharacterNodeLocalPose>& node_poses,
+        const std::string& joint_fragment,
+        const Vec3& world_offset = {}) const;
+
     [[nodiscard]] CharacterSplitFrame sample_split_branch(
         std::size_t animation,
         double time_seconds,
