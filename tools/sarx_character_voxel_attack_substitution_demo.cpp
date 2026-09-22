@@ -476,21 +476,6 @@ double torso_override_rms(
         : 0.0;
 }
 
-sarx::Vec3 normalized_or_throw(
-    const sarx::Vec3& vector,
-    const std::string& label) {
-
-    const double magnitude =
-        sarx::length(vector);
-
-    if (magnitude <= 1e-9) {
-        throw std::runtime_error(
-            label + " has zero magnitude");
-    }
-
-    return vector / magnitude;
-}
-
 } // namespace
 
 int main(int argc, char** argv) {
@@ -522,10 +507,6 @@ int main(int argc, char** argv) {
         const double base_duration =
             base_character.animation_duration(
                 base_clip);
-
-        const double replacement_duration =
-            replacement_character.animation_duration(
-                replacement_clip);
 
         const auto base_capability =
             sarx::describe_authored_action(
@@ -587,13 +568,9 @@ int main(int argc, char** argv) {
         const double dt =
             1.0 / args.fps;
 
-        const double cut_time =
-            static_cast<double>(
-                args.cut_frame)
-            / args.fps;
-
-        // Establish the canonical attack direction from the real Quaternius
-        // Jab's measured peak extension.
+        // Preserve the opponent/target from the original attack. The
+        // replacement elbow must reach the same place Punch_Jab intended
+        // to hit; the target is not repositioned onto the fallback path.
         const double jab_peak_time =
             base_duration * 0.326923;
 
@@ -603,94 +580,16 @@ int main(int argc, char** argv) {
                 jab_peak_time,
                 false);
 
-        const sarx::Vec3 jab_peak_hand =
+        const sarx::Vec3 target =
             base_character
                 .node_world_position_with_local_poses(
                     jab_peak_pose,
                     "hand_l");
 
-        const sarx::Vec3 jab_peak_pelvis =
-            base_character
-                .node_world_position_with_local_poses(
-                    jab_peak_pose,
-                    "pelvis");
-
-        const sarx::Vec3 attack_direction =
-            normalized_or_throw(
-                jab_peak_hand
-                    - jab_peak_pelvis,
-                "Punch_Jab attack direction");
-
-        // Target placement is derived from the composed pose, not from the
-        // replacement clip in isolation. This prevents a false contact proof
-        // when base-torso authority changes the elbow trajectory.
-        sarx::Vec3 target{};
-        double best_projection =
-            -std::numeric_limits<double>::infinity();
-
-        const double scan_duration =
-            std::min(
-                2.0,
-                std::max(
-                    0.0,
-                    replacement_duration
-                        - args.replacement_start_seconds));
-
-        for (double t = 0.0;
-             t <= scan_duration + 1e-9;
-             t += 1.0 / 60.0) {
-
-            const auto base_pose =
-                base_character.sample_node_local_poses(
-                    base_clip,
-                    cut_time + t,
-                    false);
-
-            const auto replacement_pose =
-                replacement_character.sample_node_local_poses(
-                    replacement_clip,
-                    args.replacement_start_seconds + t,
-                    false);
-
-            const auto composed =
-                sarx::compose_action_local_poses(
-                    base_pose,
-                    replacement_pose,
-                    authority,
-                    1.0);
-
-            const sarx::Vec3 elbow =
-                base_character
-                    .node_world_position_with_local_poses(
-                        composed,
-                        "lowerarm_l");
-
-            const sarx::Vec3 pelvis =
-                base_character
-                    .node_world_position_with_local_poses(
-                        composed,
-                        "pelvis");
-
-            const double projection =
-                sarx::dot(
-                    elbow - pelvis,
-                    attack_direction);
-
-            if (projection > best_projection) {
-                best_projection = projection;
-                target = elbow;
-            }
-        }
-
-        if (!std::isfinite(best_projection)) {
-            throw std::runtime_error(
-                "could not derive composed elbow target");
-        }
-
         const double target_radius =
             std::max(
-                0.065,
-                args.voxel_size * 1.45);
+                0.10,
+                args.voxel_size * 2.20);
 
         std::size_t destroyed_total = 0;
         int detached_frame = -1;
