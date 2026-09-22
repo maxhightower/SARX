@@ -50,6 +50,7 @@ jobs:
               assets/quaternius/character.glb \
               "build/combat-glb/${semantic}.glb" \
               "${semantic}" \
+              </dev/null \
               2>&1 | tee "build/combat-logs/${semantic}-retarget.log"
           done
 
@@ -76,9 +77,10 @@ jobs:
               --frames 360 \
               --fps 30 \
               --min-mapped-joints 17 \
+              </dev/null \
               2>&1 | tee "build/combat-logs/${semantic}-render.log"
 
-            ffmpeg -y \
+            ffmpeg -nostdin -y \
               -framerate 30 \
               -i "${frames}/frame_%04d.ppm" \
               -c:v libx264 \
