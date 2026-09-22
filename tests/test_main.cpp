@@ -2299,6 +2299,104 @@ void test_attack_authority_masks_detached_hand_from_replacement_animation() {
         "healthy opposite arm should keep the original base-animation authority");
 }
 
+void test_action_local_pose_compositor_replaces_only_authorized_chain() {
+    const std::vector<sarx::CharacterJointInfo> joints = {
+        {"root", "", {}},
+        {"spine_01", "root", {}},
+        {"upperarm_r", "spine_01", {}},
+        {"lowerarm_r", "upperarm_r", {}},
+        {"hand_r", "lowerarm_r", {}}
+    };
+
+    const auto elbow =
+        sarx::make_elbow_strike_capability(
+            "Elbow_Right",
+            sarx::ActionSide::Right);
+
+    const auto authority =
+        sarx::build_action_authority_plan(
+            joints,
+            elbow,
+            {"hand_r"});
+
+    std::vector<sarx::CharacterNodeLocalPose> base = {
+        {"root", "", {}, {0.0, 0.0, 0.0, 1.0}, {1.0, 1.0, 1.0}},
+        {"spine_01", "root", {}, {0.0, 0.0, 0.0, 1.0}, {1.0, 1.0, 1.0}},
+        {"upperarm_r", "spine_01", {}, {0.0, 0.0, 0.0, 1.0}, {1.0, 1.0, 1.0}},
+        {"lowerarm_r", "upperarm_r", {}, {0.0, 0.0, 0.0, 1.0}, {1.0, 1.0, 1.0}},
+        {"hand_r", "lowerarm_r", {}, {0.0, 0.0, 0.0, 1.0}, {1.0, 1.0, 1.0}}
+    };
+
+    auto replacement = base;
+
+    const double s =
+        std::sqrt(0.5);
+
+    replacement[2].rotation =
+        {0.0, 0.0, s, s};
+
+    replacement[3].rotation =
+        {0.0, s, 0.0, s};
+
+    replacement[4].rotation =
+        {s, 0.0, 0.0, s};
+
+    const auto composed =
+        sarx::compose_action_local_poses(
+            base,
+            replacement,
+            authority,
+            1.0);
+
+    auto rotation_for =
+        [&](const std::string& joint) {
+
+            const auto found =
+                std::find_if(
+                    composed.begin(),
+                    composed.end(),
+                    [&](const sarx::CharacterNodeLocalPose& pose) {
+                        return pose.name == joint;
+                    });
+
+            return found == composed.end()
+                ? std::array<double, 4>{
+                    0.0, 0.0, 0.0, 0.0}
+                : found->rotation;
+        };
+
+    const auto spine =
+        rotation_for("spine_01");
+
+    const auto upperarm =
+        rotation_for("upperarm_r");
+
+    const auto lowerarm =
+        rotation_for("lowerarm_r");
+
+    const auto hand =
+        rotation_for("hand_r");
+
+    check(
+        std::abs(spine[3] - 1.0) < 1e-9,
+        "base torso rotation must survive regional action composition");
+
+    check(
+        std::abs(upperarm[2] - s) < 1e-9
+            && std::abs(upperarm[3] - s) < 1e-9,
+        "replacement animation should own the authorized upper arm");
+
+    check(
+        std::abs(lowerarm[1] - s) < 1e-9
+            && std::abs(lowerarm[3] - s) < 1e-9,
+        "replacement animation should own the authorized lower arm");
+
+    check(
+        std::abs(hand[0]) < 1e-9
+            && std::abs(hand[3] - 1.0) < 1e-9,
+        "physics-owned detached hand must not inherit replacement animation");
+}
+
 void test_humanoid_shoulder_cut_detaches_arm_cleanly() {
     auto fixture = sarx::build_humanoid_fixture();
     DamageSystem damage;
@@ -2395,6 +2493,7 @@ int main() {
     test_authored_injury_motion_replaces_walk_after_foot_loss();
     test_attack_capability_distinguishes_hand_elbow_and_shoulder_loss();
     test_attack_authority_masks_detached_hand_from_replacement_animation();
+    test_action_local_pose_compositor_replaces_only_authorized_chain();
     test_humanoid_shoulder_cut_detaches_arm_cleanly();
 
     if (failures != 0) {
