@@ -83,6 +83,8 @@ struct SideMetrics {
     double initial_reach{};
     double max_relative_displacement{};
     double max_extension_time{};
+    sarx::Vec3 max_extension_hand{};
+    sarx::Vec3 max_extension_pelvis{};
 };
 
 SideMetrics audit_side(
@@ -152,6 +154,8 @@ SideMetrics audit_side(
             metrics.initial_reach = reach;
             metrics.max_reach = reach;
             metrics.max_extension_time = time;
+            metrics.max_extension_hand = hand;
+            metrics.max_extension_pelvis = pelvis;
             have_previous = true;
         } else {
             const double relative_speed =
@@ -176,6 +180,8 @@ SideMetrics audit_side(
             if (reach > metrics.max_reach) {
                 metrics.max_reach = reach;
                 metrics.max_extension_time = time;
+                metrics.max_extension_hand = hand;
+                metrics.max_extension_pelvis = pelvis;
             }
 
             previous_relative = relative;
@@ -284,6 +290,24 @@ void audit_clip(
         << (right.max_reach - right.initial_reach)
         << " right_score="
         << right_score
+        << " primary_peak_hand=("
+        << primary.max_extension_hand.x << ","
+        << primary.max_extension_hand.y << ","
+        << primary.max_extension_hand.z << ")"
+        << " primary_peak_pelvis=("
+        << primary.max_extension_pelvis.x << ","
+        << primary.max_extension_pelvis.y << ","
+        << primary.max_extension_pelvis.z << ")"
+        << " primary_relative=("
+        << (primary.max_extension_hand.x
+            - primary.max_extension_pelvis.x)
+        << ","
+        << (primary.max_extension_hand.y
+            - primary.max_extension_pelvis.y)
+        << ","
+        << (primary.max_extension_hand.z
+            - primary.max_extension_pelvis.z)
+        << ")"
         << '\n';
 }
 
