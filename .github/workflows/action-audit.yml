@@ -1,0 +1,37 @@
+name: Audit Quaternius combat actions
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "research/m2-action-substitution-v1"
+    paths:
+      - "tools/sarx_character_action_audit.cpp"
+      - "CMakeLists.txt"
+      - ".github/workflows/action-audit.yml"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build action audit
+        run: cmake --build build --config Release --target sarx_character_action_audit
+
+      - name: Audit Punch_Jab and Punch_Cross
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build/sarx_character_action_audit             --character assets/quaternius/character.glb             --animations assets/quaternius/animations.glb             --fps 60             --voxel-size 0.045             | tee build/action-audit.log
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarx-action-audit
+          path: build/action-audit.log
+          if-no-files-found: error
