@@ -339,20 +339,6 @@ double torso_override_rms(
         : 0.0;
 }
 
-sarx::Vec3 normalized_or_throw(
-    const sarx::Vec3& value,
-    const char* label) {
-
-    const double length = sarx::length(value);
-
-    if (length <= 1e-9) {
-        throw std::runtime_error(
-            std::string(label) + " has zero length");
-    }
-
-    return value / length;
-}
-
 } // namespace
 
 int main(int argc, char** argv) {
@@ -420,87 +406,27 @@ int main(int argc, char** argv) {
         const double cut_time =
             static_cast<double>(args.cut_frame) / args.fps;
 
-        // Derive target direction from real Quaternius Punch_Cross.
-        const double cross_peak_time =
-            cross_duration * 0.266667;
+        // The opponent does not move just because the attacking limb was
+        // severed. Keep the same target the original left Jab was aimed at.
+        const double jab_peak_time =
+            jab_duration * 0.326923;
 
-        const auto cross_peak =
+        const auto jab_peak_pose =
             character.sample_node_local_poses(
-                cross,
-                cross_peak_time,
+                jab,
+                jab_peak_time,
                 false);
 
-        const sarx::Vec3 peak_hand =
+        const sarx::Vec3 target =
             character.node_world_position_with_local_poses(
-                cross_peak,
-                "hand_r");
+                jab_peak_pose,
+                "hand_l");
 
-        const sarx::Vec3 peak_pelvis =
-            character.node_world_position_with_local_poses(
-                cross_peak,
-                "pelvis");
-
-        const sarx::Vec3 attack_direction =
-            normalized_or_throw(
-                peak_hand - peak_pelvis,
-                "Punch_Cross attack direction");
-
-        // Target is derived from the actual composed base-Jab/right-Cross path.
-        sarx::Vec3 target{};
-        double best_projection =
-            -std::numeric_limits<double>::infinity();
-
-        for (double t = 0.0;
-             t <= cross_duration + 1e-9;
-             t += 1.0 / 60.0) {
-
-            const auto base_pose =
-                character.sample_node_local_poses(
-                    jab,
-                    std::min(cut_time + t, jab_duration),
-                    false);
-
-            const auto replacement_pose =
-                character.sample_node_local_poses(
-                    cross,
-                    std::min(t, cross_duration),
-                    false);
-
-            const auto composed =
-                sarx::compose_action_local_poses(
-                    base_pose,
-                    replacement_pose,
-                    authority,
-                    1.0);
-
-            const sarx::Vec3 hand =
-                character.node_world_position_with_local_poses(
-                    composed,
-                    "hand_r");
-
-            const sarx::Vec3 pelvis =
-                character.node_world_position_with_local_poses(
-                    composed,
-                    "pelvis");
-
-            const double projection =
-                sarx::dot(
-                    hand - pelvis,
-                    attack_direction);
-
-            if (projection > best_projection) {
-                best_projection = projection;
-                target = hand;
-            }
-        }
-
-        if (!std::isfinite(best_projection)) {
-            throw std::runtime_error(
-                "could not derive composed Cross target");
-        }
-
+        // A compact torso-sized hit volume around the original Jab contact
+        // point allows the opposite Cross to land on the same opponent
+        // without placing the target on the fallback trajectory itself.
         const double target_radius =
-            std::max(0.065, args.voxel_size * 1.45);
+            std::max(0.10, args.voxel_size * 2.20);
 
         std::size_t destroyed_total = 0;
         int detached_frame = -1;
