@@ -355,6 +355,37 @@ sarx::Vec3 normalized_or_throw(
     return value / magnitude;
 }
 
+
+double point_segment_distance(
+    const sarx::Vec3& point,
+    const sarx::Vec3& a,
+    const sarx::Vec3& b) {
+
+    const sarx::Vec3 ab =
+        b - a;
+
+    const double ab_length_squared =
+        sarx::length_squared(ab);
+
+    if (ab_length_squared <= 1e-12) {
+        return sarx::length(
+            point - a);
+    }
+
+    const double t =
+        std::clamp(
+            sarx::dot(
+                point - a,
+                ab)
+                / ab_length_squared,
+            0.0,
+            1.0);
+
+    return sarx::length(
+        point
+        - (a + ab * t));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -422,10 +453,15 @@ int main(int argc, char** argv) {
         const double cut_time =
             static_cast<double>(args.cut_frame) / args.fps;
 
-        // The opponent does not move just because the attacking limb was
-        // severed. Keep the same target the original left Jab was aimed at.
+        // Freeze one opponent torso volume before damage. It is centered
+        // between the audited intact Jab and intact Cross contact points, so
+        // both authored attacks demonstrably reach the same opponent without
+        // placing the target on the damaged fallback trajectory itself.
         const double jab_peak_time =
             jab_duration * 0.326923;
+
+        const double cross_peak_time =
+            cross_duration * 0.266667;
 
         const auto jab_peak_pose =
             character.sample_node_local_poses(
@@ -433,16 +469,37 @@ int main(int argc, char** argv) {
                 jab_peak_time,
                 false);
 
-        const sarx::Vec3 target =
+        const auto cross_peak_pose =
+            character.sample_node_local_poses(
+                cross,
+                cross_peak_time,
+                false);
+
+        const sarx::Vec3 jab_peak_hand =
             character.node_world_position_with_local_poses(
                 jab_peak_pose,
                 "hand_l");
 
-        // A compact torso-sized hit volume around the original Jab contact
-        // point allows the opposite Cross to land on the same opponent
-        // without placing the target on the fallback trajectory itself.
+        const sarx::Vec3 cross_peak_hand =
+            character.node_world_position_with_local_poses(
+                cross_peak_pose,
+                "hand_r");
+
+        const sarx::Vec3 target =
+            (jab_peak_hand
+             + cross_peak_hand)
+            * 0.5;
+
+        const double baseline_separation =
+            sarx::length(
+                jab_peak_hand
+                - cross_peak_hand);
+
         const double target_radius =
-            std::max(0.10, args.voxel_size * 2.20);
+            std::max(
+                baseline_separation * 0.5
+                    + 0.06,
+                args.voxel_size * 2.5);
 
         std::size_t destroyed_total = 0;
         int detached_frame = -1;
@@ -789,24 +846,39 @@ int main(int argc, char** argv) {
                         composed,
                         "hand_r");
 
-                const double distance =
-                    sarx::length(hand - target);
+                const double endpoint_distance =
+                    sarx::length(
+                        hand - target);
 
-                min_target_distance =
-                    std::min(min_target_distance, distance);
+                double swept_distance =
+                    endpoint_distance;
 
                 double speed = 0.0;
 
                 if (have_previous_hand) {
                     speed =
-                        sarx::length(hand - previous_hand) / dt;
+                        sarx::length(
+                            hand - previous_hand)
+                        / dt;
+
+                    swept_distance =
+                        point_segment_distance(
+                            target,
+                            previous_hand,
+                            hand);
                 }
+
+                min_target_distance =
+                    std::min(
+                        min_target_distance,
+                        swept_distance);
 
                 previous_hand = hand;
                 have_previous_hand = true;
 
                 if (contact_frame < 0
-                    && distance <= target_radius) {
+                    && swept_distance
+                        <= target_radius) {
                     contact_frame = frame;
                     contact_velocity = speed;
                 }
@@ -925,6 +997,8 @@ int main(int argc, char** argv) {
             << " upperarm_r_attached_fraction=" << upperarm_r
             << " lowerarm_r_attached_fraction=" << lowerarm_r
             << " hand_r_attached_fraction=" << hand_r
+            << " target_radius=" << target_radius
+            << " baseline_contact_separation=" << baseline_separation
             << " min_target_distance=" << min_target_distance
             << " contact_frame=" << contact_frame
             << " max_torso_override_rms=" << max_torso_override
