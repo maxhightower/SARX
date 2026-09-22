@@ -125,6 +125,12 @@ public:
         bool loop = true,
         const Vec3& world_offset = {}) const;
 
+    [[nodiscard]] std::vector<Vec3>
+    sample_bound_points_with_node_local_poses(
+        const std::vector<CharacterPointBinding>& bindings,
+        const std::vector<CharacterNodeLocalPose>& node_poses,
+        const Vec3& world_offset = {}) const;
+
     [[nodiscard]] double binding_branch_weight(
         const CharacterPointBinding& binding,
         const std::string& root_joint_fragment) const;
