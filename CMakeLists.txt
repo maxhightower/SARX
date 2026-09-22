@@ -93,6 +93,12 @@ add_executable(sarx_character_action_audit
 target_link_libraries(sarx_character_action_audit PRIVATE sarx)
 target_compile_features(sarx_character_action_audit PRIVATE cxx_std_20)
 
+add_executable(sarx_character_voxel_attack_substitution_demo
+    tools/sarx_character_voxel_attack_substitution_demo.cpp
+)
+target_link_libraries(sarx_character_voxel_attack_substitution_demo PRIVATE sarx)
+target_compile_features(sarx_character_voxel_attack_substitution_demo PRIVATE cxx_std_20)
+
 if (SARX_BUILD_TESTS)
     enable_testing()
 
