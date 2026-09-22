@@ -663,6 +663,31 @@ VoxelizedCharacter::sample_centers(
         world_offset);
 }
 
+std::vector<Vec3>
+VoxelizedCharacter::sample_centers_with_node_local_poses(
+    const GltfCharacter& character,
+    const std::vector<CharacterNodeLocalPose>& node_poses,
+    const Vec3& world_offset) const {
+
+    std::vector<CharacterPointBinding>
+        bindings;
+
+    bindings.reserve(
+        voxels_.size());
+
+    for (const CharacterVoxel& voxel
+         : voxels_) {
+        bindings.push_back(
+            voxel.skin_binding);
+    }
+
+    return character
+        .sample_bound_points_with_node_local_poses(
+            bindings,
+            node_poses,
+            world_offset);
+}
+
 CharacterMeshFrame
 VoxelizedCharacter::render(
     const std::vector<Vec3>& world_centers) const {
