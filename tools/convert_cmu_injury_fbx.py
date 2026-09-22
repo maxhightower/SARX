@@ -129,15 +129,16 @@ def strip_non_rotation_animation_channels(glb_path: Path):
 def main():
     argv = sys.argv[sys.argv.index("--") + 1 :]
 
-    if len(argv) != 3:
+    if len(argv) not in (3, 4):
         raise RuntimeError(
             "usage: blender --python convert_cmu_injury_fbx.py "
-            "-- SOURCE_FBX TARGET_CHARACTER_GLB OUTPUT_GLB"
+            "-- SOURCE_FBX TARGET_CHARACTER_GLB OUTPUT_GLB [SEMANTIC_NAME]"
         )
 
     source = Path(argv[0]).resolve()
     target_character = Path(argv[1]).resolve()
     destination = Path(argv[2]).resolve()
+    semantic_override = argv[3] if len(argv) == 4 else None
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     clean_scene()
@@ -254,9 +255,13 @@ def main():
         )
 
     clip_key = source.stem
-    clip_name = CLIP_NAMES.get(
-        clip_key,
-        f"CMU_{clip_key}",
+    clip_name = (
+        semantic_override
+        if semantic_override
+        else CLIP_NAMES.get(
+            clip_key,
+            f"CMU_{clip_key}",
+        )
     )
 
     target_action = bpy.data.actions.new(clip_name)
