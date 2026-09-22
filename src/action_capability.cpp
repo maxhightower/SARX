@@ -1,0 +1,215 @@
+#include "sarx/action_capability.hpp"
+
+namespace sarx {
+
+ActionCapability make_hand_punch_capability(
+    const std::string& motion_id,
+    ActionSide side) {
+
+    ActionCapability capability;
+    capability.motion_id = motion_id;
+    capability.family = ActionFamily::Punch;
+    capability.side = side;
+
+    if (side == ActionSide::Left) {
+        capability.effector =
+            ActionEffector::LeftHand;
+
+        capability.required_regions = {
+            {"pelvis", 0.45},
+            {"spine_01", 0.45},
+            {"upperarm_l", 0.70},
+            {"lowerarm_l", 0.65},
+            {"hand_l", 0.60}
+        };
+
+        capability.optional_regions = {
+            {"upperarm_r", 0.35},
+            {"lowerarm_r", 0.35}
+        };
+
+        capability.authority_joint_roots = {
+            "clavicle_l",
+            "upperarm_l",
+            "lowerarm_l",
+            "hand_l"
+        };
+
+        capability.contact_regions = {
+            "hand_l"
+        };
+    } else {
+        capability.side =
+            ActionSide::Right;
+
+        capability.effector =
+            ActionEffector::RightHand;
+
+        capability.required_regions = {
+            {"pelvis", 0.45},
+            {"spine_01", 0.45},
+            {"upperarm_r", 0.70},
+            {"lowerarm_r", 0.65},
+            {"hand_r", 0.60}
+        };
+
+        capability.optional_regions = {
+            {"upperarm_l", 0.35},
+            {"lowerarm_l", 0.35}
+        };
+
+        capability.authority_joint_roots = {
+            "clavicle_r",
+            "upperarm_r",
+            "lowerarm_r",
+            "hand_r"
+        };
+
+        capability.contact_regions = {
+            "hand_r"
+        };
+    }
+
+    return capability;
+}
+
+ActionCapability make_elbow_strike_capability(
+    const std::string& motion_id,
+    ActionSide side) {
+
+    ActionCapability capability;
+    capability.motion_id = motion_id;
+    capability.family = ActionFamily::ElbowStrike;
+    capability.side = side;
+
+    if (side == ActionSide::Left) {
+        capability.effector =
+            ActionEffector::LeftElbow;
+
+        capability.required_regions = {
+            {"pelvis", 0.40},
+            {"spine_01", 0.40},
+            {"upperarm_l", 0.70},
+            // The elbow is represented by the proximal lower-arm region.
+            // A hand is intentionally not required.
+            {"lowerarm_l", 0.15}
+        };
+
+        capability.authority_joint_roots = {
+            "clavicle_l",
+            "upperarm_l",
+            "lowerarm_l"
+        };
+
+        capability.contact_regions = {
+            "upperarm_l",
+            "lowerarm_l"
+        };
+    } else {
+        capability.side =
+            ActionSide::Right;
+
+        capability.effector =
+            ActionEffector::RightElbow;
+
+        capability.required_regions = {
+            {"pelvis", 0.40},
+            {"spine_01", 0.40},
+            {"upperarm_r", 0.70},
+            {"lowerarm_r", 0.15}
+        };
+
+        capability.authority_joint_roots = {
+            "clavicle_r",
+            "upperarm_r",
+            "lowerarm_r"
+        };
+
+        capability.contact_regions = {
+            "upperarm_r",
+            "lowerarm_r"
+        };
+    }
+
+    capability.contact_phase_begin = 0.55;
+    capability.contact_phase_end = 0.85;
+
+    return capability;
+}
+
+MotionViabilityResult evaluate_action_viability(
+    const ActionCapability& capability,
+    const std::vector<AnatomicalAvailability>& anatomy) {
+
+    MotionCapability motion;
+    motion.motion_id = capability.motion_id;
+    motion.semantic_intent = capability.semantic_intent;
+    motion.required_regions = capability.required_regions;
+    motion.optional_regions = capability.optional_regions;
+
+    return evaluate_motion_viability(
+        motion,
+        anatomy);
+}
+
+const char* action_family_name(
+    ActionFamily family) {
+
+    switch (family) {
+    case ActionFamily::Punch:
+        return "Punch";
+    case ActionFamily::ElbowStrike:
+        return "ElbowStrike";
+    case ActionFamily::ForearmStrike:
+        return "ForearmStrike";
+    case ActionFamily::ShoulderStrike:
+        return "ShoulderStrike";
+    case ActionFamily::Kick:
+        return "Kick";
+    case ActionFamily::KneeStrike:
+        return "KneeStrike";
+    case ActionFamily::HeadStrike:
+        return "HeadStrike";
+    case ActionFamily::Unknown:
+        break;
+    }
+
+    return "Unknown";
+}
+
+const char* action_effector_name(
+    ActionEffector effector) {
+
+    switch (effector) {
+    case ActionEffector::LeftHand:
+        return "LeftHand";
+    case ActionEffector::RightHand:
+        return "RightHand";
+    case ActionEffector::LeftElbow:
+        return "LeftElbow";
+    case ActionEffector::RightElbow:
+        return "RightElbow";
+    case ActionEffector::LeftForearm:
+        return "LeftForearm";
+    case ActionEffector::RightForearm:
+        return "RightForearm";
+    case ActionEffector::LeftKnee:
+        return "LeftKnee";
+    case ActionEffector::RightKnee:
+        return "RightKnee";
+    case ActionEffector::LeftFoot:
+        return "LeftFoot";
+    case ActionEffector::RightFoot:
+        return "RightFoot";
+    case ActionEffector::Head:
+        return "Head";
+    case ActionEffector::Torso:
+        return "Torso";
+    case ActionEffector::Unknown:
+        break;
+    }
+
+    return "Unknown";
+}
+
+} // namespace sarx
