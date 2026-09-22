@@ -2057,6 +2057,44 @@ void test_authored_injury_motion_replaces_walk_after_foot_loss() {
         "planner must not invent an injury animation when no authored motion is available");
 }
 
+void test_quaternius_punch_semantics_are_explicit() {
+    const auto jab =
+        sarx::describe_authored_action(
+            "Punch_Jab");
+
+    const auto cross =
+        sarx::describe_authored_action(
+            "Punch_Cross");
+
+    check(
+        jab.family == sarx::ActionFamily::Punch
+            && jab.side == sarx::ActionSide::Left
+            && jab.effector
+                == sarx::ActionEffector::LeftHand,
+        "audited Quaternius Punch_Jab must remain a left-hand punch");
+
+    check(
+        cross.family == sarx::ActionFamily::Punch
+            && cross.side == sarx::ActionSide::Right
+            && cross.effector
+                == sarx::ActionEffector::RightHand,
+        "audited Quaternius Punch_Cross must remain a right-hand punch");
+
+    check(
+        jab.contact_phase_begin
+                < 0.326923
+            && jab.contact_phase_end
+                > 0.326923,
+        "Punch_Jab contact window must contain the measured extension phase");
+
+    check(
+        cross.contact_phase_begin
+                < 0.266667
+            && cross.contact_phase_end
+                > 0.266667,
+        "Punch_Cross contact window must contain the measured extension phase");
+}
+
 void test_attack_capability_distinguishes_hand_elbow_and_shoulder_loss() {
     std::vector<sarx::AnatomicalAvailability> anatomy = {
         {"pelvis", 100, 100},
@@ -2491,6 +2529,7 @@ int main() {
     test_grounded_recovery_selects_kneel_and_defers_locomotion();
     test_grounded_recovery_getup_requires_intact_biped();
     test_authored_injury_motion_replaces_walk_after_foot_loss();
+    test_quaternius_punch_semantics_are_explicit();
     test_attack_capability_distinguishes_hand_elbow_and_shoulder_loss();
     test_attack_authority_masks_detached_hand_from_replacement_animation();
     test_action_local_pose_compositor_replaces_only_authorized_chain();
