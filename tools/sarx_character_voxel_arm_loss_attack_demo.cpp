@@ -940,6 +940,9 @@ int main(int argc, char** argv) {
         const double hand_r =
             voxel_character.attached_fraction("hand_r");
 
+        const auto stats =
+            voxel_character.stats();
+
         std::cout
             << "SARX whole-arm substitution diagnostics:"
             << " destroyed_voxels=" << stats.destroyed_voxels
@@ -1013,8 +1016,6 @@ int main(int argc, char** argv) {
             throw std::runtime_error(
                 "shoulder cut altered unrelated or surviving attack anatomy");
         }
-
-        const auto stats = voxel_character.stats();
 
         std::cout
             << "SARX whole-arm attack substitution complete:"
