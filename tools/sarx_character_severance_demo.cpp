@@ -1,5 +1,6 @@
 #include "sarx/body.hpp"
 #include "sarx/character_render.hpp"
+#include "sarx/detached_articulation.hpp"
 #include "sarx/gltf_character.hpp"
 
 #include <algorithm>
@@ -354,230 +355,6 @@ sarx::CharacterMeshFrame transform_segment(
     return out;
 }
 
-double joint_angle(
-    const sarx::Vec3& a,
-    const sarx::Vec3& joint,
-    const sarx::Vec3& b) {
-
-    const sarx::Vec3 u =
-        sarx::normalized(a - joint);
-    const sarx::Vec3 v =
-        sarx::normalized(b - joint);
-
-    if (sarx::length_squared(u) <= 1e-12
-        || sarx::length_squared(v) <= 1e-12) {
-        return 0.0;
-    }
-
-    return std::acos(
-        std::clamp(
-            sarx::dot(u, v),
-            -1.0,
-            1.0));
-}
-
-sarx::Vec3 rotate_axis_angle(
-    const sarx::Vec3& value,
-    const sarx::Vec3& axis,
-    double angle) {
-
-    const sarx::Vec3 n =
-        sarx::normalized(axis);
-
-    if (sarx::length_squared(n) <= 1e-12) {
-        return value;
-    }
-
-    const double c = std::cos(angle);
-    const double si = std::sin(angle);
-
-    return value * c
-        + sarx::cross(n, value) * si
-        + n * (
-            sarx::dot(n, value)
-            * (1.0 - c));
-}
-
-void project_distance(
-    sarx::Particle& a,
-    sarx::Particle& b,
-    double rest_length,
-    double strength = 1.0) {
-
-    const sarx::Vec3 delta =
-        b.position - a.position;
-
-    const double length =
-        sarx::length(delta);
-
-    if (length <= 1e-12) {
-        return;
-    }
-
-    const sarx::Vec3 correction =
-        delta
-        * ((length - rest_length)
-           / length
-           * 0.5
-           * strength);
-
-    a.position += correction;
-    b.position -= correction;
-}
-
-void project_passive_joint(
-    sarx::Particle& a,
-    sarx::Particle& joint,
-    sarx::Particle& b,
-    double rest_angle,
-    double min_angle,
-    double max_angle,
-    double passive_strength,
-    double limit_strength) {
-
-    const sarx::Vec3 u =
-        a.position - joint.position;
-    const sarx::Vec3 v =
-        b.position - joint.position;
-
-    if (sarx::length_squared(u) <= 1e-12
-        || sarx::length_squared(v) <= 1e-12) {
-        return;
-    }
-
-    const double angle =
-        joint_angle(
-            a.position,
-            joint.position,
-            b.position);
-
-    double target = rest_angle;
-    double strength = passive_strength;
-
-    if (angle < min_angle) {
-        target = min_angle;
-        strength = limit_strength;
-    } else if (angle > max_angle) {
-        target = max_angle;
-        strength = limit_strength;
-    }
-
-    const sarx::Vec3 axis =
-        sarx::cross(u, v);
-
-    if (sarx::length_squared(axis) <= 1e-12) {
-        return;
-    }
-
-    const double half_correction =
-        (target - angle)
-        * strength
-        * 0.5;
-
-    const sarx::Vec3 new_u =
-        rotate_axis_angle(
-            u,
-            axis,
-            -half_correction);
-
-    const sarx::Vec3 new_v =
-        rotate_axis_angle(
-            v,
-            axis,
-            half_correction);
-
-    a.position =
-        joint.position + new_u;
-
-    b.position =
-        joint.position + new_v;
-}
-
-void damp_passive_joint(
-    sarx::Particle& a,
-    sarx::Particle& joint,
-    sarx::Particle& b,
-    double damping) {
-
-    const sarx::Vec3 u =
-        sarx::normalized(
-            a.position - joint.position);
-    const sarx::Vec3 v =
-        sarx::normalized(
-            b.position - joint.position);
-
-    if (sarx::length_squared(u) <= 1e-12
-        || sarx::length_squared(v) <= 1e-12) {
-        return;
-    }
-
-    const sarx::Vec3 rel_a =
-        a.velocity - joint.velocity;
-    const sarx::Vec3 rel_b =
-        b.velocity - joint.velocity;
-
-    const sarx::Vec3 tangent_a =
-        rel_a
-        - u * sarx::dot(rel_a, u);
-
-    const sarx::Vec3 tangent_b =
-        rel_b
-        - v * sarx::dot(rel_b, v);
-
-    a.velocity -= tangent_a * damping;
-    b.velocity -= tangent_b * damping;
-
-    joint.velocity +=
-        (tangent_a + tangent_b)
-        * (damping * 0.15);
-}
-
-bool project_segment_floor(
-    sarx::Particle& a,
-    sarx::Particle& b,
-    double radius) {
-
-    bool contacted = false;
-
-    constexpr double samples[] = {
-        0.15,
-        0.35,
-        0.50,
-        0.65,
-        0.85
-    };
-
-    for (const double t : samples) {
-        const double wa = 1.0 - t;
-        const double wb = t;
-
-        const double y =
-            a.position.y * wa
-            + b.position.y * wb;
-
-        if (y >= radius) {
-            continue;
-        }
-
-        const double denominator =
-            wa * wa + wb * wb;
-
-        if (denominator <= 1e-12) {
-            continue;
-        }
-
-        const double correction =
-            (radius - y)
-            / denominator;
-
-        a.position.y += correction * wa;
-        b.position.y += correction * wb;
-        contacted = true;
-    }
-
-    return contacted;
-}
-
 sarx::CharacterMeshFrame combine(
     const sarx::CharacterMeshFrame& body,
     const sarx::CharacterMeshFrame& detached) {
@@ -766,10 +543,7 @@ int main(int argc, char** argv) {
         sarx::CharacterMeshFrame hand_snapshot;
 
         std::array<sarx::Vec3, 4> rest_anchors{};
-        std::array<double, 3> limb_rest_lengths{};
-        std::array<sarx::ParticleId, 4> limb_particles{};
-
-        sarx::Body detached_motion;
+        sarx::DetachedArticulatedChain detached_articulation;
         bool cut = false;
 
         std::size_t boundary_triangles = 0;
@@ -782,11 +556,6 @@ int main(int argc, char** argv) {
         double initial_wrist_angle = 0.0;
         double max_elbow_angle_delta = 0.0;
         double max_wrist_angle_delta = 0.0;
-
-        sarx::StepConfig detached_step;
-        detached_step.substeps = 6;
-        detached_step.solver_iterations = 16;
-        detached_step.gravity = {0.0, -9.81, 0.0};
 
         const double dt = 1.0 / args.fps;
 
@@ -816,10 +585,20 @@ int main(int argc, char** argv) {
                         world_offset);
 
                 if (!cut) {
-                    if (args.detached_root != "upperarm_r") {
+                    const bool right_arm =
+                        args.detached_root == "upperarm_r";
+                    const bool left_arm =
+                        args.detached_root == "upperarm_l";
+
+                    if (!right_arm && !left_arm) {
                         throw std::runtime_error(
-                            "articulated evidence path currently requires upperarm_r");
+                            "articulated arm evidence path requires upperarm_r or upperarm_l");
                     }
+
+                    const std::string lowerarm_root =
+                        right_arm ? "lowerarm_r" : "lowerarm_l";
+                    const std::string hand_root =
+                        right_arm ? "hand_r" : "hand_l";
 
                     const double previous_seconds =
                         static_cast<double>(frame - 1)
@@ -840,7 +619,7 @@ int main(int argc, char** argv) {
                         character.sample_split_branch(
                             clip,
                             seconds,
-                            "lowerarm_r",
+                            lowerarm_root,
                             true,
                             world_offset);
 
@@ -848,7 +627,7 @@ int main(int argc, char** argv) {
                         character.sample_split_branch(
                             clip,
                             seconds,
-                            "hand_r",
+                            hand_root,
                             true,
                             world_offset);
 
@@ -856,7 +635,7 @@ int main(int argc, char** argv) {
                         character.sample_split_branch(
                             clip,
                             previous_seconds,
-                            "lowerarm_r",
+                            lowerarm_root,
                             true,
                             previous_offset);
 
@@ -864,7 +643,7 @@ int main(int argc, char** argv) {
                         character.sample_split_branch(
                             clip,
                             previous_seconds,
-                            "hand_r",
+                            hand_root,
                             true,
                             previous_offset);
 
@@ -929,97 +708,17 @@ int main(int argc, char** argv) {
                             previous_hand,
                             previous_anchors[2]);
 
-                    const double masses[4] = {
-                        0.32,
-                        0.28,
-                        0.22,
-                        0.18
-                    };
-
-                    for (std::size_t i = 0;
-                         i < limb_particles.size();
-                         ++i) {
-
-                        limb_particles[i] =
-                            detached_motion.add_particle(
-                                rest_anchors[i],
-                                masses[i]);
-
-                        detached_motion
-                            .particles()[limb_particles[i]]
-                            .velocity =
-                                (rest_anchors[i]
-                                 - previous_anchors[i])
-                                / dt;
-                    }
-
-                    detached_motion.add_structural_constraint(
-                        limb_particles[0],
-                        limb_particles[1],
-                        1e-8);
-                    detached_motion.add_structural_constraint(
-                        limb_particles[1],
-                        limb_particles[2],
-                        1e-8);
-                    detached_motion.add_structural_constraint(
-                        limb_particles[2],
-                        limb_particles[3],
-                        1e-8);
-
                     initial_elbow_angle =
-                        joint_angle(
+                        sarx::articulated_joint_angle(
                             rest_anchors[0],
                             rest_anchors[1],
                             rest_anchors[2]);
 
                     initial_wrist_angle =
-                        joint_angle(
+                        sarx::articulated_joint_angle(
                             rest_anchors[1],
                             rest_anchors[2],
                             rest_anchors[3]);
-
-                    for (std::size_t i = 0;
-                         i < limb_rest_lengths.size();
-                         ++i) {
-                        limb_rest_lengths[i] =
-                            sarx::length(
-                                rest_anchors[i + 1]
-                                - rest_anchors[i]);
-                    }
-
-                    boundary_triangles =
-                        split.boundary_triangles_removed;
-
-                    detached_triangles =
-                        split.detached.indices.size() / 3;
-
-                    cut = true;
-                } else {
-                    detached_motion.step(
-                        dt,
-                        detached_step);
-
-                    constexpr double ground_radius = 0.040;
-                    constexpr double restitution = 0.08;
-                    constexpr double tangential_damping = 0.66;
-
-                    auto& particles =
-                        detached_motion.particles();
-
-                    std::array<sarx::Vec3, 4> before_contact{};
-                    std::array<bool, 4> touched{
-                        false,
-                        false,
-                        false,
-                        false
-                    };
-
-                    for (std::size_t i = 0;
-                         i < limb_particles.size();
-                         ++i) {
-                        before_contact[i] =
-                            particles[limb_particles[i]].position;
-                    }
 
                     const double wrist_min =
                         std::max(
@@ -1031,177 +730,103 @@ int main(int argc, char** argv) {
                             3.05,
                             initial_wrist_angle + 0.75);
 
-                    // Iterate floor contact, length preservation, and
-                    // passive joint resistance together. A forearm/hand
-                    // impact therefore pushes through the elbow instead
-                    // of letting the chain collapse like frictionless rope.
-                    for (int contact_iteration = 0;
-                         contact_iteration < 8;
-                         ++contact_iteration) {
+                    sarx::DetachedArticulationConfig articulation;
+                    articulation.rest_anchors.assign(
+                        rest_anchors.begin(),
+                        rest_anchors.end());
 
-                        for (std::size_t segment = 0;
-                             segment < 3;
-                             ++segment) {
+                    articulation.previous_anchors.assign(
+                        previous_anchors.begin(),
+                        previous_anchors.end());
 
-                            const bool hit =
-                                project_segment_floor(
-                                    particles[
-                                        limb_particles[segment]],
-                                    particles[
-                                        limb_particles[segment + 1]],
-                                    ground_radius);
+                    articulation.masses = {
+                        0.32,
+                        0.28,
+                        0.22,
+                        0.18
+                    };
 
-                            if (hit) {
-                                touched[segment] = true;
-                                touched[segment + 1] = true;
-                            }
-                        }
-
-                        for (std::size_t segment = 0;
-                             segment < 3;
-                             ++segment) {
-                            project_distance(
-                                particles[
-                                    limb_particles[segment]],
-                                particles[
-                                    limb_particles[segment + 1]],
-                                limb_rest_lengths[segment],
-                                0.98);
-                        }
-
-                        project_passive_joint(
-                            particles[limb_particles[0]],
-                            particles[limb_particles[1]],
-                            particles[limb_particles[2]],
-                            initial_elbow_angle,
+                    articulation.joints = {
+                        sarx::PassiveJointProfile{
+                            1,
                             0.35,
                             3.05,
                             0.070,
-                            0.60);
-
-                        project_passive_joint(
-                            particles[limb_particles[1]],
-                            particles[limb_particles[2]],
-                            particles[limb_particles[3]],
-                            initial_wrist_angle,
+                            0.60,
+                            0.18
+                        },
+                        sarx::PassiveJointProfile{
+                            2,
                             wrist_min,
                             wrist_max,
                             0.090,
-                            0.65);
-
-                        for (std::size_t segment = 0;
-                             segment < 3;
-                             ++segment) {
-                            project_distance(
-                                particles[
-                                    limb_particles[segment]],
-                                particles[
-                                    limb_particles[segment + 1]],
-                                limb_rest_lengths[segment],
-                                0.98);
+                            0.65,
+                            0.24
                         }
+                    };
+
+                    articulation.ground_radius = 0.040;
+                    articulation.restitution = 0.08;
+                    articulation.tangential_damping = 0.66;
+                    articulation.contact_velocity_scale = 0.22;
+                    articulation.global_velocity_damping = 0.992;
+                    articulation.contact_iterations = 8;
+                    articulation.substeps = 6;
+                    articulation.solver_iterations = 16;
+
+                    detached_articulation.initialize(
+                        articulation,
+                        dt);
+
+                    boundary_triangles =
+                        split.boundary_triangles_removed;
+
+                    detached_triangles =
+                        split.detached.indices.size() / 3;
+
+                    cut = true;
+                } else {
+                    const std::size_t contacts_before =
+                        detached_articulation
+                            .ground_contacts();
+
+                    detached_articulation.step(dt);
+
+                    ground_contacts =
+                        detached_articulation
+                            .ground_contacts();
+
+                    ever_grounded =
+                        detached_articulation
+                            .ever_grounded();
+
+                    if (first_ground_contact_frame < 0
+                        && contacts_before == 0
+                        && ground_contacts > 0) {
+                        first_ground_contact_frame = frame;
                     }
 
-                    damp_passive_joint(
-                        particles[limb_particles[0]],
-                        particles[limb_particles[1]],
-                        particles[limb_particles[2]],
-                        0.18);
+                    max_elbow_angle_delta =
+                        detached_articulation
+                            .max_joint_angle_delta(0);
 
-                    damp_passive_joint(
-                        particles[limb_particles[1]],
-                        particles[limb_particles[2]],
-                        particles[limb_particles[3]],
-                        0.24);
-
-                    for (std::size_t i = 0;
-                         i < limb_particles.size();
-                         ++i) {
-
-                        auto& particle =
-                            particles[limb_particles[i]];
-
-                        const sarx::Vec3 positional_impulse =
-                            (particle.position
-                             - before_contact[i])
-                            / dt;
-
-                        particle.velocity +=
-                            positional_impulse * 0.22;
-
-                        // Small passive tissue/air damping. Gravity stays
-                        // physical; this only removes the frictionless,
-                        // instantaneous-collapse look.
-                        particle.velocity *= 0.992;
-
-                        if (!touched[i]) {
-                            continue;
-                        }
-
-                        if (particle.velocity.y < 0.0) {
-                            particle.velocity.y =
-                                -particle.velocity.y
-                                * restitution;
-                        }
-
-                        particle.velocity.x *= tangential_damping;
-                        particle.velocity.z *= tangential_damping;
-
-                        if (std::abs(particle.velocity.y) < 0.05) {
-                            particle.velocity.y = 0.0;
-                        }
-
-                        ++ground_contacts;
-                        ever_grounded = true;
-
-                        if (first_ground_contact_frame < 0) {
-                            first_ground_contact_frame = frame;
-                        }
-                    }
+                    max_wrist_angle_delta =
+                        detached_articulation
+                            .max_joint_angle_delta(1);
                 }
 
                 const sarx::Vec3 shoulder =
-                    detached_motion
-                        .particles()[limb_particles[0]]
-                        .position;
+                    detached_articulation
+                        .anchor_position(0);
                 const sarx::Vec3 elbow =
-                    detached_motion
-                        .particles()[limb_particles[1]]
-                        .position;
+                    detached_articulation
+                        .anchor_position(1);
                 const sarx::Vec3 wrist =
-                    detached_motion
-                        .particles()[limb_particles[2]]
-                        .position;
+                    detached_articulation
+                        .anchor_position(2);
                 const sarx::Vec3 hand_tip =
-                    detached_motion
-                        .particles()[limb_particles[3]]
-                        .position;
-
-                const double elbow_angle =
-                    joint_angle(
-                        shoulder,
-                        elbow,
-                        wrist);
-
-                const double wrist_angle =
-                    joint_angle(
-                        elbow,
-                        wrist,
-                        hand_tip);
-
-                max_elbow_angle_delta =
-                    std::max(
-                        max_elbow_angle_delta,
-                        std::abs(
-                            elbow_angle
-                            - initial_elbow_angle));
-
-                max_wrist_angle_delta =
-                    std::max(
-                        max_wrist_angle_delta,
-                        std::abs(
-                            wrist_angle
-                            - initial_wrist_angle));
+                    detached_articulation
+                        .anchor_position(3);
 
                 const auto upperarm =
                     transform_segment(

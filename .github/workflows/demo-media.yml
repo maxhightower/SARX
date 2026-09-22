@@ -8,6 +8,11 @@ on:
       - "tools/sarx_humanoid_demo.cpp"
       - "tools/sarx_character_demo.cpp"
       - "tools/sarx_character_severance_demo.cpp"
+      - "tools/sarx_character_head_severance_demo.cpp"
+      - "tools/sarx_character_voxel_demo.cpp"
+      - "tools/sarx_character_voxel_thigh_demo.cpp"
+      - "src/voxel_character.cpp"
+      - "include/sarx/voxel_character.hpp"
       - "src/gltf_character.cpp"
       - "include/sarx/gltf_character.hpp"
       - "src/character_render.cpp"
@@ -30,6 +35,11 @@ on:
       - "tools/sarx_humanoid_demo.cpp"
       - "tools/sarx_character_demo.cpp"
       - "tools/sarx_character_severance_demo.cpp"
+      - "tools/sarx_character_head_severance_demo.cpp"
+      - "tools/sarx_character_voxel_demo.cpp"
+      - "tools/sarx_character_voxel_thigh_demo.cpp"
+      - "src/voxel_character.cpp"
+      - "include/sarx/voxel_character.hpp"
       - "src/gltf_character.cpp"
       - "include/sarx/gltf_character.hpp"
       - "src/character_render.cpp"
@@ -63,9 +73,13 @@ jobs:
           cmake --build build --config Release --target sarx_humanoid_demo
           cmake --build build --config Release --target sarx_character_demo
           cmake --build build --config Release --target sarx_character_severance_demo
+          cmake --build build --config Release --target sarx_character_head_severance_demo
+          cmake --build build --config Release --target sarx_character_voxel_demo
+          cmake --build build --config Release --target sarx_character_voxel_thigh_demo
 
       - name: Render bridge frames
         run: |
+          set -o pipefail
           ./build/sarx_severance_demo \
             --output build/demo_frames \
             --frames 120 \
@@ -73,6 +87,7 @@ jobs:
 
       - name: Render humanoid frames
         run: |
+          set -o pipefail
           ./build/sarx_humanoid_demo \
             --output build/humanoid_frames \
             --frames 150 \
@@ -80,6 +95,7 @@ jobs:
 
       - name: Render real skinned walk frames
         run: |
+          set -o pipefail
           ./build/sarx_character_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
@@ -91,6 +107,7 @@ jobs:
 
       - name: Render real skinned severance frames
         run: |
+          set -o pipefail
           ./build/sarx_character_severance_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
@@ -102,6 +119,73 @@ jobs:
             --fps 30 \
             --require-ground-contact \
             --require-articulated-limb | tee build/character_severance.log
+
+      - name: Render real skinned left-arm severance frames
+        run: |
+          set -o pipefail
+          ./build/sarx_character_severance_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --clip Walk \
+            --detach-root upperarm_l \
+            --output build/character_left_arm_frames \
+            --frames 210 \
+            --cut-frame 90 \
+            --fps 30 \
+            --require-ground-contact \
+            --require-articulated-limb | tee build/character_left_arm.log
+
+      - name: Render real skinned head severance frames
+        run: |
+          set -o pipefail
+          ./build/sarx_character_head_severance_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --clip Walk \
+            --output build/character_head_frames \
+            --frames 210 \
+            --cut-frame 90 \
+            --fps 30 \
+            --require-ground-contact \
+            --require-rotation | tee build/character_head.log
+
+      - name: Render Quaternius voxel left-hand detachment frames
+        run: |
+          set -o pipefail
+          ./build/sarx_character_voxel_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --clip Walk \
+            --output build/character_voxel_frames \
+            --frames 210 \
+            --damage-frame 75 \
+            --fps 30 \
+            --voxel-size 0.045 \
+            --require-damage \
+            --require-detachment \
+            --require-ground-contact \
+            --require-anatomical-isolation \
+            --require-walk-viability | tee build/character_voxel.log
+
+      - name: Render Quaternius voxel left-thigh severance frames
+        run: |
+          set -o pipefail
+          ./build/sarx_character_voxel_thigh_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --clip Walk \
+            --output build/character_voxel_thigh_frames \
+            --frames 210 \
+            --cut-frame 75 \
+            --fps 30 \
+            --voxel-size 0.045 \
+            --require-damage \
+            --require-detachment \
+            --require-ground-contact \
+            --require-walk-invalidation \
+            --require-anatomical-isolation \
+            --require-stable-camera \
+            --require-articulated-leg | tee build/character_voxel_thigh.log
 
       - name: Encode MP4s
         run: |
@@ -137,6 +221,38 @@ jobs:
             -pix_fmt yuv420p \
             -crf 20 \
             build/media/v05_real_character_walk_severance.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/character_left_arm_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v06_real_character_left_arm_severance.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/character_head_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v06_real_character_head_severance.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/character_voxel_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v08_quaternius_voxel_left_hand_detach.mp4
+
+          ffmpeg -y \
+            -framerate 30 \
+            -i build/character_voxel_thigh_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/media/v09_quaternius_voxel_left_thigh_cut.mp4
 
       - name: Encode GIF previews
         run: |
@@ -205,6 +321,18 @@ jobs:
             echo
             echo "[real skinned character walk severance log]"
             cat build/character_severance.log
+            echo
+            echo "[real skinned left arm severance log]"
+            cat build/character_left_arm.log
+            echo
+            echo "[real skinned head severance log]"
+            cat build/character_head.log
+            echo
+            echo "[Quaternius voxel left-hand detachment log]"
+            cat build/character_voxel.log
+            echo
+            echo "[Quaternius voxel left-thigh severance log]"
+            cat build/character_voxel_thigh.log
           } > build/media/provenance.txt
 
       - name: Upload prototype media
@@ -220,5 +348,9 @@ jobs:
             build/media/v05_real_character_walk.gif
             build/media/v05_real_character_walk_severance.mp4
             build/media/v05_real_character_walk_severance.gif
+            build/media/v06_real_character_left_arm_severance.mp4
+            build/media/v06_real_character_head_severance.mp4
+            build/media/v08_quaternius_voxel_left_hand_detach.mp4
+            build/media/v09_quaternius_voxel_left_thigh_cut.mp4
             build/media/provenance.txt
           if-no-files-found: error

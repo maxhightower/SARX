@@ -2,6 +2,7 @@
 
 #include "sarx/math.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -25,6 +26,19 @@ struct CharacterJointInfo {
     std::string name;
     std::string parent;
     Vec3 rest_world_position{};
+};
+
+struct CharacterPointInfluence {
+    int joint_node{-1};
+    std::string joint_name;
+    Vec3 joint_local_point{};
+    double weight{};
+};
+
+struct CharacterPointBinding {
+    std::array<CharacterPointInfluence, 4> influences{};
+    std::size_t influence_count{};
+    std::string dominant_joint;
 };
 
 struct CharacterAssetStats {
@@ -72,6 +86,25 @@ public:
         const std::string& detached_root_joint_fragment,
         bool loop = true,
         const Vec3& world_offset = {}) const;
+
+    [[nodiscard]] std::vector<CharacterPointBinding>
+    bind_points_to_skin(
+        std::size_t animation,
+        double time_seconds,
+        const std::vector<Vec3>& world_points,
+        bool loop = true) const;
+
+    [[nodiscard]] std::vector<Vec3>
+    sample_bound_points(
+        const std::vector<CharacterPointBinding>& bindings,
+        std::size_t animation,
+        double time_seconds,
+        bool loop = true,
+        const Vec3& world_offset = {}) const;
+
+    [[nodiscard]] double binding_branch_weight(
+        const CharacterPointBinding& binding,
+        const std::string& root_joint_fragment) const;
 
 private:
     struct Impl;
