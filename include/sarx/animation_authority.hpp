@@ -35,6 +35,13 @@ build_action_authority_plan(
     const ActionCapability& replacement,
     const std::vector<std::string>& physics_joint_roots);
 
+[[nodiscard]] std::vector<CharacterNodeLocalPose>
+compose_action_local_poses(
+    const std::vector<CharacterNodeLocalPose>& base,
+    const std::vector<CharacterNodeLocalPose>& replacement,
+    const AnimationAuthorityPlan& authority,
+    double replacement_blend);
+
 [[nodiscard]] const char* animation_authority_source_name(
     AnimationAuthoritySource source);
 
