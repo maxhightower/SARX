@@ -74,6 +74,9 @@ struct ActionCapability {
     const std::string& motion_id,
     ActionSide side);
 
+[[nodiscard]] ActionCapability describe_authored_action(
+    const std::string& motion_id);
+
 [[nodiscard]] MotionViabilityResult evaluate_action_viability(
     const ActionCapability& capability,
     const std::vector<AnatomicalAvailability>& anatomy);
