@@ -1,0 +1,114 @@
+name: Audition CMU combat motions
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "research/m2-action-substitution-v1"
+    paths:
+      - "tools/fetch_cmu_combat_candidates.py"
+      - "tools/convert_cmu_injury_fbx.py"
+      - ".github/workflows/combat-candidate-audition.yml"
+
+jobs:
+  audition:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install conversion and media dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y blender python3-numpy ffmpeg
+          python3 -m pip install --user "huggingface_hub>=0.25,<2"
+
+      - name: Download CMU combat candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/combat-source build/combat-glb build/combat-media build/combat-logs
+          mkdir -p build/combat-source build/combat-glb build/combat-media build/combat-logs
+          python3 tools/fetch_cmu_combat_candidates.py build/combat-source
+
+      - name: Retarget candidates onto Quaternius
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tail -n +2 build/combat-source/manifest.tsv | \
+          while IFS=$'\t' read -r source_id semantic repo_path size_bytes
+          do
+            echo "Retargeting ${semantic} from ${repo_path}"
+            blender --background --factory-startup \
+              --python tools/convert_cmu_injury_fbx.py \
+              -- \
+              "build/combat-source/${source_id}.fbx" \
+              assets/quaternius/character.glb \
+              "build/combat-glb/${semantic}.glb" \
+              "${semantic}" \
+              </dev/null \
+              2>&1 | tee "build/combat-logs/${semantic}-retarget.log"
+          done
+
+      - name: Configure and build renderer
+        run: |
+          cmake -S . -B build/sarx -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/sarx --config Release --target sarx_character_demo
+
+      - name: Render candidate videos
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tail -n +2 build/combat-source/manifest.tsv | \
+          while IFS=$'\t' read -r source_id semantic repo_path size_bytes
+          do
+            frames="build/${semantic}-frames"
+
+            ./build/sarx/sarx_character_demo \
+              --character assets/quaternius/character.glb \
+              --animations "build/combat-glb/${semantic}.glb" \
+              --clip "${semantic}" \
+              --output "${frames}" \
+              --frames 360 \
+              --fps 30 \
+              --min-mapped-joints 17 \
+              </dev/null \
+              2>&1 | tee "build/combat-logs/${semantic}-render.log"
+
+            ffmpeg -nostdin -y \
+              -framerate 30 \
+              -i "${frames}/frame_%04d.ppm" \
+              -c:v libx264 \
+              -pix_fmt yuv420p \
+              -crf 20 \
+              "build/combat-media/${semantic}.mp4"
+
+            rm -rf "${frames}"
+          done
+
+      - name: Record provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "source=CMU Graphics Lab Motion Capture Database"
+            echo "conversion_dataset=gbionics/cmu-fbx"
+            echo
+            cat build/combat-source/manifest.tsv
+          } > build/combat-media/provenance.txt
+
+      - name: Upload combat audition
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarx-cmu-combat-audition
+          path: |
+            build/combat-media/*.mp4
+            build/combat-media/provenance.txt
+            build/combat-logs/*.log
+          if-no-files-found: error

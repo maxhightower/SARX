@@ -1268,6 +1268,502 @@ GltfCharacter::animation_target_nodes(
     return nodes;
 }
 
+std::vector<CharacterNodeLocalPose>
+GltfCharacter::sample_node_local_poses(
+    std::size_t animation,
+    double time_seconds,
+    bool loop) const {
+
+    if (animation >= impl_->clips.size()) {
+        throw std::out_of_range(
+            "animation index out of range");
+    }
+
+    const Clip& clip =
+        impl_->clips[animation];
+
+    double time = time_seconds;
+
+    if (clip.duration > 1e-12) {
+        if (loop) {
+            time = std::fmod(
+                std::max(0.0, time),
+                clip.duration);
+        } else {
+            time = std::clamp(
+                time,
+                0.0,
+                clip.duration);
+        }
+    }
+
+    std::vector<NodePose> poses =
+        impl_->rest_nodes;
+
+    for (const Track& track : clip.tracks) {
+        if (track.node < 0
+            || static_cast<std::size_t>(
+                   track.node)
+                >= poses.size()) {
+            continue;
+        }
+
+        NodePose& pose =
+            poses[track.node];
+
+        pose.matrix_mode = false;
+
+        const auto value =
+            sample_track(
+                track,
+                time);
+
+        switch (track.path) {
+        case TrackPath::Translation:
+            pose.translation = {
+                value[0],
+                value[1],
+                value[2]
+            };
+            break;
+        case TrackPath::Rotation:
+            pose.rotation = {
+                value[0],
+                value[1],
+                value[2],
+                value[3]
+            };
+            break;
+        case TrackPath::Scale:
+            pose.scale = {
+                value[0],
+                value[1],
+                value[2]
+            };
+            break;
+        }
+    }
+
+    std::vector<CharacterNodeLocalPose>
+        output;
+
+    output.reserve(
+        poses.size());
+
+    for (std::size_t i = 0;
+         i < poses.size();
+         ++i) {
+
+        const NodePose& pose =
+            poses[i];
+
+        // Matrix-mode rest nodes are intentionally omitted. The public
+        // pose-composition API is a partial TRS override, so omitted nodes
+        // preserve their authoritative rest matrix when sampled later.
+        if (pose.matrix_mode
+            || pose.name.empty()) {
+            continue;
+        }
+
+        CharacterNodeLocalPose out;
+        out.name = pose.name;
+
+        if (pose.parent >= 0
+            && static_cast<std::size_t>(
+                   pose.parent)
+                < poses.size()) {
+            out.parent =
+                poses[
+                    static_cast<std::size_t>(
+                        pose.parent)]
+                    .name;
+        }
+
+        out.translation =
+            pose.translation;
+
+        out.rotation = {
+            pose.rotation.x,
+            pose.rotation.y,
+            pose.rotation.z,
+            pose.rotation.w
+        };
+
+        out.scale =
+            pose.scale;
+
+        output.push_back(
+            std::move(out));
+    }
+
+    return output;
+}
+
+CharacterMeshFrame
+GltfCharacter::sample_with_node_local_poses(
+    const std::vector<CharacterNodeLocalPose>& node_poses,
+    const Vec3& world_offset) const {
+
+    std::vector<NodePose> poses =
+        impl_->rest_nodes;
+
+    for (const auto& override_pose
+         : node_poses) {
+
+        const auto found =
+            impl_->node_by_name.find(
+                lower_copy(
+                    override_pose.name));
+
+        if (found
+            == impl_->node_by_name.end()) {
+            continue;
+        }
+
+        const int index =
+            found->second;
+
+        if (index < 0
+            || static_cast<std::size_t>(
+                   index)
+                >= poses.size()) {
+            continue;
+        }
+
+        NodePose& pose =
+            poses[
+                static_cast<std::size_t>(
+                    index)];
+
+        pose.matrix_mode = false;
+
+        pose.translation =
+            override_pose.translation;
+
+        pose.rotation = {
+            override_pose.rotation[0],
+            override_pose.rotation[1],
+            override_pose.rotation[2],
+            override_pose.rotation[3]
+        };
+
+        pose.scale =
+            override_pose.scale;
+    }
+
+    std::vector<Mat4> globals(
+        poses.size(),
+        identity());
+
+    std::vector<std::uint8_t> state(
+        poses.size(),
+        0u);
+
+    const auto compute_global =
+        [&](auto&& self,
+            std::size_t index) -> const Mat4& {
+
+        if (state[index] == 2u) {
+            return globals[index];
+        }
+
+        if (state[index] == 1u) {
+            throw std::runtime_error(
+                "cycle in character node hierarchy");
+        }
+
+        state[index] = 1u;
+
+        const NodePose& pose =
+            poses[index];
+
+        const Mat4 local =
+            pose.matrix_mode
+            ? pose.matrix
+            : trs(
+                pose.translation,
+                pose.rotation,
+                pose.scale);
+
+        if (pose.parent >= 0) {
+            globals[index] =
+                multiply(
+                    self(
+                        self,
+                        static_cast<std::size_t>(
+                            pose.parent)),
+                    local);
+        } else {
+            globals[index] =
+                local;
+        }
+
+        state[index] = 2u;
+        return globals[index];
+    };
+
+    for (std::size_t i = 0;
+         i < poses.size();
+         ++i) {
+        (void)compute_global(
+            compute_global,
+            i);
+    }
+
+    CharacterMeshFrame frame;
+
+    frame.positions.reserve(
+        impl_->stats.vertices);
+
+    frame.indices.reserve(
+        impl_->stats.triangles * 3);
+
+    for (const MeshPart& part : impl_->parts) {
+        const std::uint32_t base =
+            static_cast<std::uint32_t>(
+                frame.positions.size());
+
+        const bool has_skin =
+            part.skin >= 0
+            && static_cast<std::size_t>(
+                   part.skin)
+                < impl_->skins.size();
+
+        for (const VertexData& vertex
+             : part.vertices) {
+
+            Vec3 world{};
+
+            if (has_skin
+                && vertex.skinned) {
+
+                const SkinData& skin =
+                    impl_->skins[
+                        static_cast<std::size_t>(
+                            part.skin)];
+
+                double total = 0.0;
+
+                for (int influence = 0;
+                     influence < 4;
+                     ++influence) {
+
+                    const double weight =
+                        vertex.weights[influence];
+
+                    if (weight <= 1e-12) {
+                        continue;
+                    }
+
+                    const std::size_t joint_slot =
+                        vertex.joints[influence];
+
+                    if (joint_slot
+                            >= skin.joints.size()
+                        || joint_slot
+                            >= skin.inverse_bind.size()) {
+                        continue;
+                    }
+
+                    const int joint_node =
+                        skin.joints[
+                            joint_slot];
+
+                    if (joint_node < 0
+                        || static_cast<std::size_t>(
+                               joint_node)
+                            >= globals.size()) {
+                        continue;
+                    }
+
+                    const Mat4 skin_matrix =
+                        multiply(
+                            globals[
+                                static_cast<std::size_t>(
+                                    joint_node)],
+                            skin.inverse_bind[
+                                joint_slot]);
+
+                    world +=
+                        transform_point(
+                            skin_matrix,
+                            vertex.position)
+                        * weight;
+
+                    total += weight;
+                }
+
+                if (total <= 1e-12) {
+                    world =
+                        transform_point(
+                            globals[
+                                static_cast<std::size_t>(
+                                    part.node)],
+                            vertex.position);
+                } else if (
+                    std::abs(
+                        total - 1.0)
+                    > 1e-8) {
+
+                    world =
+                        world / total;
+                }
+            } else {
+                world =
+                    transform_point(
+                        globals[
+                            static_cast<std::size_t>(
+                                part.node)],
+                        vertex.position);
+            }
+
+            frame.positions.push_back(
+                world + world_offset);
+        }
+
+        for (const std::uint32_t index
+             : part.indices) {
+
+            frame.indices.push_back(
+                base + index);
+        }
+    }
+
+    return frame;
+}
+
+Vec3 GltfCharacter::node_world_position_with_local_poses(
+    const std::vector<CharacterNodeLocalPose>& node_poses,
+    const std::string& joint_fragment,
+    const Vec3& world_offset) const {
+
+    std::vector<NodePose> poses =
+        impl_->rest_nodes;
+
+    for (const auto& override_pose
+         : node_poses) {
+
+        const auto found =
+            impl_->node_by_name.find(
+                lower_copy(
+                    override_pose.name));
+
+        if (found
+            == impl_->node_by_name.end()) {
+            continue;
+        }
+
+        const int index =
+            found->second;
+
+        if (index < 0
+            || static_cast<std::size_t>(
+                   index)
+                >= poses.size()) {
+            continue;
+        }
+
+        NodePose& pose =
+            poses[
+                static_cast<std::size_t>(
+                    index)];
+
+        pose.matrix_mode = false;
+        pose.translation =
+            override_pose.translation;
+
+        pose.rotation = {
+            override_pose.rotation[0],
+            override_pose.rotation[1],
+            override_pose.rotation[2],
+            override_pose.rotation[3]
+        };
+
+        pose.scale =
+            override_pose.scale;
+    }
+
+    std::vector<Mat4> globals(
+        poses.size(),
+        identity());
+
+    std::vector<std::uint8_t> state(
+        poses.size(),
+        0u);
+
+    const auto compute_global =
+        [&](auto&& self,
+            std::size_t index) -> const Mat4& {
+
+        if (state[index] == 2u) {
+            return globals[index];
+        }
+
+        if (state[index] == 1u) {
+            throw std::runtime_error(
+                "cycle in character node hierarchy");
+        }
+
+        state[index] = 1u;
+
+        const NodePose& pose =
+            poses[index];
+
+        const Mat4 local =
+            pose.matrix_mode
+            ? pose.matrix
+            : trs(
+                pose.translation,
+                pose.rotation,
+                pose.scale);
+
+        if (pose.parent >= 0) {
+            globals[index] =
+                multiply(
+                    self(
+                        self,
+                        static_cast<std::size_t>(
+                            pose.parent)),
+                    local);
+        } else {
+            globals[index] =
+                local;
+        }
+
+        state[index] = 2u;
+        return globals[index];
+    };
+
+    for (std::size_t i = 0;
+         i < poses.size();
+         ++i) {
+        (void)compute_global(
+            compute_global,
+            i);
+    }
+
+    const int joint =
+        resolve_joint_fragment(
+            impl_->rest_nodes,
+            joint_fragment);
+
+    if (joint < 0
+        || static_cast<std::size_t>(
+               joint)
+            >= globals.size()) {
+        throw std::out_of_range(
+            "joint not found for composed pose: "
+            + joint_fragment);
+    }
+
+    return transform_point(
+        globals[
+            static_cast<std::size_t>(
+                joint)],
+        {})
+        + world_offset;
+}
+
 CharacterMeshFrame GltfCharacter::sample(
     std::size_t animation,
     double time_seconds,
@@ -1949,6 +2445,170 @@ GltfCharacter::sample_bound_points(
         if (total <= 1e-12) {
             throw std::runtime_error(
                 "bound character point has no valid sampled influence");
+        }
+
+        if (std::abs(total - 1.0)
+            > 1e-8) {
+            point = point / total;
+        }
+
+        points.push_back(
+            point + world_offset);
+    }
+
+    return points;
+}
+
+std::vector<Vec3>
+GltfCharacter::sample_bound_points_with_node_local_poses(
+    const std::vector<CharacterPointBinding>& bindings,
+    const std::vector<CharacterNodeLocalPose>& node_poses,
+    const Vec3& world_offset) const {
+
+    std::vector<NodePose> poses =
+        impl_->rest_nodes;
+
+    for (const auto& override_pose
+         : node_poses) {
+
+        const auto found =
+            impl_->node_by_name.find(
+                lower_copy(
+                    override_pose.name));
+
+        if (found
+            == impl_->node_by_name.end()) {
+            continue;
+        }
+
+        const int index =
+            found->second;
+
+        if (index < 0
+            || static_cast<std::size_t>(
+                   index)
+                >= poses.size()) {
+            continue;
+        }
+
+        NodePose& pose =
+            poses[
+                static_cast<std::size_t>(
+                    index)];
+
+        pose.matrix_mode = false;
+        pose.translation =
+            override_pose.translation;
+
+        pose.rotation = {
+            override_pose.rotation[0],
+            override_pose.rotation[1],
+            override_pose.rotation[2],
+            override_pose.rotation[3]
+        };
+
+        pose.scale =
+            override_pose.scale;
+    }
+
+    std::vector<Mat4> globals(
+        poses.size(),
+        identity());
+
+    std::vector<std::uint8_t> state(
+        poses.size(),
+        0u);
+
+    const auto compute_global =
+        [&](auto&& self,
+            std::size_t index) -> const Mat4& {
+
+        if (state[index] == 2u) {
+            return globals[index];
+        }
+
+        if (state[index] == 1u) {
+            throw std::runtime_error(
+                "cycle in character node hierarchy");
+        }
+
+        state[index] = 1u;
+
+        const NodePose& pose =
+            poses[index];
+
+        const Mat4 local =
+            pose.matrix_mode
+            ? pose.matrix
+            : trs(
+                pose.translation,
+                pose.rotation,
+                pose.scale);
+
+        if (pose.parent >= 0) {
+            globals[index] =
+                multiply(
+                    self(
+                        self,
+                        static_cast<std::size_t>(
+                            pose.parent)),
+                    local);
+        } else {
+            globals[index] =
+                local;
+        }
+
+        state[index] = 2u;
+        return globals[index];
+    };
+
+    for (std::size_t i = 0;
+         i < poses.size();
+         ++i) {
+        (void)compute_global(
+            compute_global,
+            i);
+    }
+
+    std::vector<Vec3> points;
+    points.reserve(
+        bindings.size());
+
+    for (const auto& binding
+         : bindings) {
+
+        Vec3 point{};
+        double total = 0.0;
+
+        for (std::size_t i = 0;
+             i < binding.influence_count;
+             ++i) {
+
+            const auto& influence =
+                binding.influences[i];
+
+            if (influence.joint_node < 0
+                || static_cast<std::size_t>(
+                       influence.joint_node)
+                    >= globals.size()
+                || influence.weight <= 1e-12) {
+                continue;
+            }
+
+            point +=
+                transform_point(
+                    globals[
+                        static_cast<std::size_t>(
+                            influence.joint_node)],
+                    influence.joint_local_point)
+                * influence.weight;
+
+            total += influence.weight;
+        }
+
+        if (total <= 1e-12) {
+            throw std::runtime_error(
+                "bound character point has no valid composed-pose influence");
         }
 
         if (std::abs(total - 1.0)

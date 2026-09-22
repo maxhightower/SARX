@@ -70,6 +70,12 @@ public:
         bool loop = true,
         const Vec3& world_offset = {}) const;
 
+    [[nodiscard]] std::vector<Vec3>
+    sample_centers_with_node_local_poses(
+        const GltfCharacter& character,
+        const std::vector<CharacterNodeLocalPose>& node_poses,
+        const Vec3& world_offset = {}) const;
+
     [[nodiscard]] CharacterMeshFrame render(
         const std::vector<Vec3>& world_centers) const;
 

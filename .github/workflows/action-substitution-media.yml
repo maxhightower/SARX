@@ -1,0 +1,96 @@
+name: Render M2-E1 action substitution evidence
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "research/m2-action-substitution-v1"
+    paths:
+      - "tools/sarx_character_voxel_arm_loss_attack_demo.cpp"
+      - "tools/sarx_character_voxel_attack_substitution_demo.cpp"
+      - "src/action_capability.cpp"
+      - "src/action_substitution.cpp"
+      - "src/animation_authority.cpp"
+      - "src/gltf_character.cpp"
+      - "src/voxel_character.cpp"
+      - "include/sarx/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/action-substitution-media.yml"
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Configure
+        run: cmake -S . -B build -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build action fixtures
+        run: |
+          cmake --build build --config Release --target sarx_character_voxel_arm_loss_attack_demo
+          cmake --build build --config Release --target sarx_character_voxel_attack_substitution_demo
+
+      - name: Render whole-arm substitution
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/evidence
+
+          ./build/sarx_character_voxel_arm_loss_attack_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --output build/arm_loss_frames \
+            --frames 120 \
+            --cut-frame 5 \
+            --fps 30 \
+            --voxel-size 0.045 \
+            --require-damage \
+            --require-detachment \
+            --require-substitution \
+            --require-contact \
+            --require-authority \
+            --require-isolation \
+            2>&1 | tee build/evidence/v17c-arm-loss.log
+
+      - name: Encode whole-arm evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -nostdin -y \
+            -framerate 30 \
+            -i build/arm_loss_frames/frame_%04d.ppm \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            -crf 20 \
+            build/evidence/v17c_quaternius_arm_loss_to_opposite_cross.mp4
+
+      - name: Record provenance
+        shell: bash
+        run: |
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "base_action=Punch_Jab"
+            echo "audited_base_effector=LeftHand"
+            echo "replacement_action=Punch_Cross"
+            echo "audited_replacement_effector=RightHand"
+            echo
+            cat build/evidence/v17c-arm-loss.log
+          } > build/evidence/v17c-provenance.txt
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarx-m2e1-action-substitution-media
+          path: |
+            build/evidence/v17c_quaternius_arm_loss_to_opposite_cross.mp4
+            build/evidence/v17c-arm-loss.log
+            build/evidence/v17c-provenance.txt
+          if-no-files-found: error

@@ -28,6 +28,14 @@ struct CharacterJointInfo {
     Vec3 rest_world_position{};
 };
 
+struct CharacterNodeLocalPose {
+    std::string name;
+    std::string parent;
+    Vec3 translation{};
+    std::array<double, 4> rotation{0.0, 0.0, 0.0, 1.0};
+    Vec3 scale{1.0, 1.0, 1.0};
+};
+
 struct CharacterPointInfluence {
     int joint_node{-1};
     std::string joint_name;
@@ -84,6 +92,22 @@ public:
         bool loop = true,
         const Vec3& world_offset = {}) const;
 
+    [[nodiscard]] std::vector<CharacterNodeLocalPose>
+    sample_node_local_poses(
+        std::size_t animation,
+        double time_seconds,
+        bool loop = true) const;
+
+    [[nodiscard]] CharacterMeshFrame
+    sample_with_node_local_poses(
+        const std::vector<CharacterNodeLocalPose>& node_poses,
+        const Vec3& world_offset = {}) const;
+
+    [[nodiscard]] Vec3 node_world_position_with_local_poses(
+        const std::vector<CharacterNodeLocalPose>& node_poses,
+        const std::string& joint_fragment,
+        const Vec3& world_offset = {}) const;
+
     [[nodiscard]] CharacterSplitFrame sample_split_branch(
         std::size_t animation,
         double time_seconds,
@@ -104,6 +128,12 @@ public:
         std::size_t animation,
         double time_seconds,
         bool loop = true,
+        const Vec3& world_offset = {}) const;
+
+    [[nodiscard]] std::vector<Vec3>
+    sample_bound_points_with_node_local_poses(
+        const std::vector<CharacterPointBinding>& bindings,
+        const std::vector<CharacterNodeLocalPose>& node_poses,
         const Vec3& world_offset = {}) const;
 
     [[nodiscard]] double binding_branch_weight(
