@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(SARX VERSION 0.4.3 LANGUAGES CXX)
+project(SARX VERSION 0.5.0 LANGUAGES CXX)
 
 option(SARX_BUILD_TESTS "Build SARX tests" ON)
 
@@ -14,6 +14,8 @@ add_library(sarx
     src/humanoid.cpp
     src/gltf_character.cpp
     src/character_render.cpp
+    src/anatomy.cpp
+    src/anatomy_render.cpp
 )
 
 target_include_directories(sarx
@@ -29,6 +31,8 @@ if (MSVC)
     target_compile_options(sarx PRIVATE /W4 /permissive-)
 else()
     target_compile_options(sarx PRIVATE -Wall -Wextra -Wpedantic)
+    # The anatomy solver never inspects errno; this lets sqrt/cbrt inline.
+    set_source_files_properties(src/anatomy.cpp PROPERTIES COMPILE_OPTIONS -fno-math-errno)
 endif()
 
 add_executable(sarx_severance_demo
@@ -55,6 +59,18 @@ add_executable(sarx_character_severance_demo
 target_link_libraries(sarx_character_severance_demo PRIVATE sarx)
 target_compile_features(sarx_character_severance_demo PRIVATE cxx_std_20)
 
+add_executable(sarx_anatomy_demo
+    tools/sarx_anatomy_demo.cpp
+)
+target_link_libraries(sarx_anatomy_demo PRIVATE sarx)
+target_compile_features(sarx_anatomy_demo PRIVATE cxx_std_20)
+
+add_executable(sarx_anatomy_bench
+    tools/sarx_anatomy_bench.cpp
+)
+target_link_libraries(sarx_anatomy_bench PRIVATE sarx)
+target_compile_features(sarx_anatomy_bench PRIVATE cxx_std_20)
+
 if (SARX_BUILD_TESTS)
     enable_testing()
 
@@ -65,6 +81,23 @@ if (SARX_BUILD_TESTS)
     target_compile_features(sarx_tests PRIVATE cxx_std_20)
 
     add_test(NAME sarx_tests COMMAND sarx_tests)
+
+    add_executable(sarx_anatomy_tests
+        tests/test_anatomy.cpp
+    )
+    target_link_libraries(sarx_anatomy_tests PRIVATE sarx)
+    target_compile_features(sarx_anatomy_tests PRIVATE cxx_std_20)
+    add_test(NAME sarx_anatomy_tests COMMAND sarx_anatomy_tests)
+
+    add_test(
+        NAME sarx_anatomy_demo_smoke
+        COMMAND sarx_anatomy_demo
+            --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_anatomy_frames
+            --frames 40
+            --every 20
+            --width 320
+            --height 180
+    )
 
     add_test(
         NAME sarx_demo_smoke

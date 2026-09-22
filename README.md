@@ -174,6 +174,68 @@ SARX can export a structure-of-arrays mirror containing particle, structural, te
 
 The project will require CPU/GPU numerical and topology parity tests before GPU results become authoritative.
 
+## Current results — V0.5 layered anatomical voxel body
+
+V0.5 adds a second body model, `AnatomyBody` (`include/sarx/anatomy.hpp`), aimed at the level of detail of the dissection work:
+
+- **Anatomy.** A layered humanoid of skin, subcutaneous fat, muscle, tendon, bone, marrow, brain, heart, lungs, liver and gut, with a skull, spine, rib cage, clavicles, scapulae and pelvis. It is driven by a skinned rig.
+- **Blades.** Cuts that must be hacked through over several strokes.
+- **Bullets.** Rounds that tunnel, shatter bone and exit into the world.
+- **Tearing.** Bodies that tear in half.
+
+The V0.4 `Body` (distance links + tets) is unchanged.
+
+| Hack through the torso (180 J chops) | Two-chop arm severance while walking |
+| --- | --- |
+| ![hack](media/gif/v05_anatomy_hack_through_torso.gif) | ![limb](media/gif/v05_anatomy_two_chop_arm_severance.gif) |
+| **Pistol and rifle rounds** | **Tear-in-half (rig-driven pull)** |
+| ![shoot](media/gif/v05_anatomy_ballistics.gif) | ![rip](media/gif/v05_anatomy_tear_in_half.gif) |
+
+MP4s are in `media/mp4/`. Regenerate them with `python tools/make_anatomy_media.py --demo build/sarx_anatomy_demo`. The demo writes a `summary.json` per scenario, with every blade and bullet event and the energy each spent per tissue.
+
+### What it takes from the literature, and where it departs
+
+- **Constraint layout (Lin 2025, Alg. 2 and §3.6; McGraw 2024).** Each voxel owns 8 corner particles held by a Gram-Schmidt voxel (VGS) shape constraint, and neighbours are joined by zero-rest-length corner bonds. Voxels own their corners, so one iteration is exactly four conflict-free parallel passes (voxels, +x, +y, +z bonds): the GPU partitioning of the thesis. SARX runs these on a CPU worker pool, with bit-identical results for any thread count (tested).
+- **Stream compaction (Lin 2025, §3.8).** Only dynamic voxels and live bonds are iterated.
+- **SARX departures, found by testing in this repo:**
+  1. *Sequential Gram-Schmidt biases rotation.* Building u1 from the already-updated u0 turns the voxel slightly on every projection. Iterated, that ratcheted into spurious spin, and resting blocks folded or exploded; adding iterations made it *worse*. SARX uses a symmetric (Jacobi / Löwdin-style) orthogonalisation.
+  2. *Separate α/β/δ relaxation is not contractive.* With a partial edge-length restore and an independent partial volume restore, a 12-voxel resting stack diverged at 4 substeps. SARX projects to the fully converged VGS goal and blends toward it with a per-tissue `shape_stiffness` (standard PBD stiffness).
+  3. *Handedness.* VGS as published uses \|det\|, so a voxel crushed through itself stays mirrored and rips its neighbours. SARX re-completes the frame right-handed.
+- **SARX additions (not claimed by the cited work):**
+  - **Energy-ordered blades.** Bonds are processed in the order the swept edge reaches them, and each spends energy. The blade lodges when the energy runs out, and partial bond damage persists, so the next stroke continues the wound.
+  - **Energy-ordered ballistics.** A round's penetration is costed per tissue, reports its exit state, and deposits momentum into the tissue near the wound channel.
+  - **Rigid bone fragments.** Shape matching (Müller et al. 2005, rotation extraction Müller et al. 2016) applies per connected bone fragment, so a chopped bone splits into rigid pieces.
+  - **Ball joints.** Joints are formed at articulations and release when the articulation is cut.
+  - **Hybrid residency.** An intact rig-driven body is kinematic (linear-blend skinned). Only wound halos, grabs and free islands are simulated, and settled islands sleep.
+  - **Stability for contact.** Stacking uses mass scaling (Macklin et al. 2014) and per-voxel ground contact, with CFL-style adaptive substeps on *relative* velocity.
+
+### Frame cost
+
+`sarx_anatomy_bench` measures simulation time per 60 Hz frame, with rendering excluded. The numbers below are from a shared 4-vCPU Intel Xeon @ 2.1 GHz container (CPU reference; no GPU). The humanoid is 70.7 kg.
+
+| 2 cm voxels (8,004 voxels / 64k particles / 21k bonds) | avg | p95 | simulated voxels |
+| --- | --- | --- | --- |
+| intact, walking (hybrid residency) | 0.41 ms | 0.49 ms | 0 |
+| after a torso chop + gunshot, walking | 3.6 ms | 4.6 ms | ≤ 1,036 |
+| whole body dynamic (worst case) | 12–14 ms | 16–21 ms | 8,004 |
+| corpse dropped on the floor, until asleep | 11–16 ms | 16–24 ms | 8,004 → 0 |
+
+At 3 cm voxels (2,399 voxels) the same rows are 0.11 / 3.3 / 4.5 / 2.2 ms. The intended in-game path is the hybrid one: intact characters cost what skinning costs, and a wound pays only for its halo. A fully dynamic 2 cm body is not a 60 fps target on this CPU. That case is what the four-pass GPU layout is for, and GPU kernels are not implemented yet.
+
+### Validated behaviour (`sarx_anatomy_tests`)
+
+| Question | Result |
+| --- | --- |
+| Is the humanoid layered, with a skin-only outer surface and an adult mass? | **Yes.** All 11 tissues are present; 70.7 kg. |
+| Does a resting block stay stable and keep its shape? | **Yes.** No energy gain; >85% height at the default budget. |
+| Can a blade lodge, keep partial bond damage, and be continued by later strokes? | **Yes.** A 21 J stroke parts exactly 8 muscle bonds and damages the 9th; four strokes sever. |
+| Does bone stop blades? | **Yes.** 70 J severs a muscle bar but lodges in the same bar with a bone core. |
+| Does a severed limb lose rig authority and fall, with damage activation staying local? | **Yes.** Exactly one component keeps the rig; fewer than 25% of voxels are activated. |
+| Do bullets tunnel, lodge in bone, pass through with a rifle, and deposit bounded momentum? | **Yes.** |
+| Is it deterministic across runs and thread counts? | **Yes.** State hashes are identical at 1 and 4 threads. |
+| Does sustained pulling tear tissue apart? | **Yes.** |
+| Do settled fragments sleep and wake on damage? | **Yes.** |
+
 ## Current results — V0.4B
 
 The current reference implementation has validated the following behaviors in automated tests:
@@ -285,34 +347,27 @@ Downloaded non-vendored PDFs go to papers/local/ and are gitignored.
 
 ## Limitations
 
-V0.4B is still a research reference, and several major pieces are intentionally absent:
+SARX is still a research reference. Current gaps:
 
-- no production GPU solver,
-- no render mesh, splat renderer, or SDF wound renderer,
-- no collision/self-collision system,
-- no contact/friction model,
-- no fluid/blood simulation,
+- no GPU solver: the V0.5 anatomy layout is GPU-shaped (four conflict-free passes) but runs on CPU threads,
+- no volumetric splat or SDF wound renderer: the anatomy renderer draws exposed voxel faces, and the V0.4 glTF path splits meshes by joint branch,
+- anatomy contacts are ground + between separate pieces; no self-collision within one connected piece,
+- no fluid/blood simulation (blood spray in the demos is presentation particles),
 - no full deformation-gradient material frame,
-- no production remeshing or cut-surface generation,
-- no performance benchmark suite yet,
-- adaptive domains are selected but not yet used to restrict solver scheduling,
-- SoA state is an export mirror, not yet a compute backend,
-- no rigged humanoid visual demonstration yet.
+- a limp body standing upright still tears some tissue while it collapses (PBD load paths through ~90 voxels; the skeleton joints mitigate but do not eliminate it),
+- the anatomy humanoid is procedural; voxelising the Quaternius glTF character into anatomy is not done yet,
+- tissue parameters are gameplay-calibrated, not measured biomechanics.
 
 The reference prioritizes **explicit, testable transition semantics** before optimization.
 
 ## Near-term roadmap
 
-The next research checkpoint is execution and visualization:
-
-1. incremental/refittable active-domain indexing,
-2. restricted-domain solver scheduling,
-3. GPU compute kernels over the SoA representation,
-4. CPU/GPU numerical and topology parity,
-5. finite-radius tet-aware cutting near cell faces,
-6. richer material-frame transport,
-7. a debug renderer for particles, constraints, tetrahedra, joints, wounds, and islands,
-8. a small rigged humanoid demonstration: **animation → deformation → cut → partial attachment → complete severance → free physical component**.
+1. GPU compute kernels for the V0.5 four-pass anatomy solver (VGS pass, three bond passes), with CPU/GPU parity tests against `state_hash`,
+2. voxelise the rigged glTF character into layered anatomy (skin weights from the mesh) so the real walking character can be hacked apart,
+3. multiresolution anatomy (Lin 2025): coarse interior voxels that refine around wounds,
+4. a surface renderer for the anatomy body (embedded mesh / splats) instead of voxel faces,
+5. self-collision within one connected piece, and blood as a fluid,
+6. long-range constraints for upright limp bodies.
 
 ## Research ethics and attribution
 

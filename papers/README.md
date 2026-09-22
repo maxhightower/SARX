@@ -29,6 +29,21 @@ That downloads the linked research copies into `papers/local/`, which is intenti
 | Macklin, Müller & Chentanez, *XPBD: Position-Based Simulation of Compliant Constrained Dynamics* (MIG 2016), DOI 10.1145/2994258.2994272 | Mathematical basis for SARX compliant structural, attachment, and tetrahedral constraints | DOI: https://doi.org/10.1145/2994258.2994272 ; author copy commonly hosted at http://mmacklin.com/xpbd.pdf | Linked only; free access is not the same as a blanket redistribution license. |
 | Müller et al., *Position Based Dynamics* (JVCIR 2007), DOI 10.1016/j.jvcir.2007.01.005 | Foundational PBD formulation | DOI: https://doi.org/10.1016/j.jvcir.2007.01.005 | Linked only. |
 
+## How V0.5 uses this work
+
+- **Lin (2025), Algorithm 2 and sections 3.6 to 3.8.** This is the direct source of the V0.5 `AnatomyBody` constraint layout:
+  - 8 corner particles per voxel and the VGS shape constraint,
+  - zero-rest-length vertex-coincident face bonds,
+  - one voxel pass plus three axis bond passes,
+  - stream compaction of active elements.
+
+  SARX departs from Algorithm 2 in three documented ways: a symmetric orthogonalisation, a single blend toward a converged goal instead of separate alpha/beta/delta relaxation, and handedness repair. The reasons and tests are in the main README.
+- **McGraw (2024) and McGraw & Zhou (2025).** These are the origin of the breakable Gram-Schmidt voxel constraints that Lin extends. SARX has not reproduced their rendering or LOD pipelines.
+- **McGraw & Myers (2026).** This motivated the goal of layered, dissectible anatomy that can be cut, torn and excised. SARX's anatomy is procedural (it does not use cryosection data), it renders exposed voxel faces rather than volumetric splats, and it does not reproduce the paper's results.
+- **Müller et al. (2005/2016) and Macklin et al. (2014).** These are the sources of the shape matching used for rigid bone fragments, the rotation extraction, and the stacking mass scaling.
+
+During V0.5 development, only the vendored Lin thesis could be read in full. The author-hosted and ACM PDFs were unreachable from the build environment, so statements about the other papers in this repository rest on their abstracts and on Lin's summary of VGS.
+
 ## What SARX does and does not claim
 
 SARX does **not** claim that the cited papers are components of one pre-existing method. It is an independent research prototype exploring the missing interfaces between ideas that were demonstrated separately:

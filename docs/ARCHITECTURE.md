@@ -254,3 +254,62 @@ The next work should focus on execution and visualization:
 - richer local-frame transport,
 - first visual debug renderer for particles, tets, constraints, bones, wounds, and islands,
 - a small rigged humanoid fixture exercising animation -> deformation -> cut -> severance.
+
+## V0.5 layered anatomical voxel body (`AnatomyBody`)
+
+`include/sarx/anatomy.hpp` and `src/anatomy.cpp` add a second physical model next to the V0.4 `Body`. It trades the per-pair distance/tet topology for a voxel lattice that is cheaper per unit volume and maps directly to GPU passes.
+
+### Representation
+
+- **Voxels and particles.** Each voxel owns 8 corner particles (corner bit 0 = +x, 1 = +y, 2 = +z). Particle arrays are float SoA.
+- **Bonds.** Each face bond joins the 4 coincident corner pairs of two neighbouring voxels (zero rest length). Bonds are stored grouped by axis.
+- **Tissue.** Each voxel carries a tissue: skin, fat, muscle, tendon, bone, marrow, brain, heart, lung, liver or gut. Tissue parameters are density, shape stiffness, bond stiffness, cut HP, tear strain, ballistic cost, rig tone and colour.
+- **Bond properties.** Bond HP and tear strain take the weaker tissue of the pair, and a per-voxel `tear_scale` gives slack skin over joints. Bone-to-bone bonds across different rig joints are articulations with ligament properties.
+
+### Solver step (per 60 Hz frame)
+
+1. Topology is refreshed if dirty. Kinematic voxels are set by linear-blend skinning, and velocity is taken from the pose delta. Dynamic voxels and bonds are stream-compacted.
+2. Adaptive substep count: enough that the largest relative bond speed (or absolute speed near the ground) moves less than half a voxel per substep, between `substeps` and `max_substeps`.
+3. Each substep runs:
+   1. integrate;
+   2. rig tone on dynamic, rig-authoritative voxels;
+   3. grabs;
+   4. `iterations` of: VGS pass → bone-fragment shape matching → ball joints (3 sweeps) → ground → bond passes x, y, z → ground;
+   5. contacts between separate pieces;
+   6. velocity update with per-voxel deformation damping;
+   7. tear check.
+4. Components are rebuilt if tearing changed topology. Settled free islands go to sleep.
+
+The VGS pass and the three bond passes are each conflict-free and run on a persistent worker pool. The result does not depend on the thread count.
+
+### Authority and residency
+
+- **Rig authority.** Among components containing root-joint bone, the one with the most root-joint bone keeps the rig. Every other component permanently becomes a free island, with the V0.4 semantics. Detached voxels keep their velocity.
+- **Residency.**
+  - `Hybrid` (the default) keeps intact rig-authoritative voxels kinematic.
+  - Damage promotes voxels within `activation_halo` (8 cm) of each event to dynamic.
+  - Grabs promote their sphere.
+  - Losing rig authority promotes the whole island.
+  - `Dynamic` simulates everything.
+- **Sleep.** A free island sleeps after `sleep_frames` consecutive frames with at least 97% of its voxels below `sleep_speed`. Damage or a grab wakes the whole island.
+
+### Damage
+
+- **Blades.** `apply_blade` sweeps bilinear patches between consecutive blade poses. Bonds whose centre-to-centre segment crosses a patch are sorted by sweep parameter and processed in that order, and each costs `hp / sharpness`.
+  - A bond the blade can't afford takes partial damage, and the blade lodges there.
+  - Parted faces are wedged apart along the patch normal.
+  - A share of the spent energy becomes momentum along the swing.
+- **Bullets.** `apply_bullet` collects voxels within the round's channel and processes them in order along the ray. Each costs its tissue's ballistic energy, scaled by voxel size.
+  - Destroyed voxels become debris records.
+  - Bone hits damage the surrounding bone bonds.
+  - Lost momentum is deposited near the channel (forward plus radial).
+  - The result carries the exit point and velocity for the host world.
+- **Tearing.** A bond tears when the centroid distance between its two voxels exceeds `(1 + tear_strain) · h`. Measuring between centroids is independent of solve order; corner gaps stay near zero because bonds are solved last.
+  - Sustained overload drains HP over a few substeps.
+  - Overload above 3x parts the bond at once.
+
+### Known limitations
+
+- There is no self-collision inside one connected piece.
+- An upright limp body still tears some tissue while collapsing.
+- Tissue values are calibrated for plausible gameplay, not measured.
