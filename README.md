@@ -2,6 +2,10 @@
 
 **Real-time destructible dynamics for animated characters.**
 
+![Voxelized Quaternius character: walking, left-thigh cut, fall, then grounded kneel recovery](media/gif/v11_quaternius_fall_to_grounded_recovery.gif)
+
+*Walk → left-thigh cut → fall (`Death01`) → grounded kneel recovery (`Fixing_Kneeling`) on a voxelized Quaternius character. CPU reference, 270 frames at 30 fps. Full-quality clip: [`media/mp4/v11_quaternius_fall_to_grounded_recovery.mp4`](media/mp4/v11_quaternius_fall_to_grounded_recovery.mp4); provenance: [`media/v11_quaternius_fall_to_grounded_recovery.md`](media/v11_quaternius_fall_to_grounded_recovery.md).*
+
 SARX is an experimental character-physics research project exploring a missing systems problem in real-time graphics:
 
 > Can an ordinarily rigged, animated character transition locally and continuously into deformable, tearing, fracturing, and fully detached physical matter without rebuilding the character from scratch whenever its topology changes?
