@@ -26,6 +26,9 @@ struct DetachedArticulationConfig {
     double segment_length_strength{0.98};
 
     double ground_radius{0.04};
+    // Optional per-segment floor-contact radii (segment i spans anchors i and
+    // i+1). Empty: every segment uses ground_radius.
+    std::vector<double> segment_ground_radii;
     double restitution{0.08};
     double tangential_damping{0.66};
 

@@ -93,12 +93,6 @@ add_executable(sarx_character_action_audit
 target_link_libraries(sarx_character_action_audit PRIVATE sarx)
 target_compile_features(sarx_character_action_audit PRIVATE cxx_std_20)
 
-add_executable(sarx_character_voxel_attack_substitution_demo
-    tools/sarx_character_voxel_attack_substitution_demo.cpp
-)
-target_link_libraries(sarx_character_voxel_attack_substitution_demo PRIVATE sarx)
-target_compile_features(sarx_character_voxel_attack_substitution_demo PRIVATE cxx_std_20)
-
 add_executable(sarx_character_voxel_arm_loss_attack_demo
     tools/sarx_character_voxel_arm_loss_attack_demo.cpp
 )
@@ -185,6 +179,29 @@ if (SARX_BUILD_TESTS)
                 --cut-frame 2
                 --fps 30
         )
+
+        # M2-E1 attack-substitution gates on the real Quaternius voxel
+        # character (shortened; the media workflow renders 120 frames).
+        foreach(SARX_E1_INJURY whole-arm hand)
+            add_test(
+                NAME sarx_m2e1_${SARX_E1_INJURY}_substitution
+                COMMAND sarx_character_voxel_arm_loss_attack_demo
+                    --character ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/character.glb
+                    --animations ${CMAKE_CURRENT_SOURCE_DIR}/assets/quaternius/animations.glb
+                    --injury ${SARX_E1_INJURY}
+                    --output ${CMAKE_CURRENT_BINARY_DIR}/sarx_m2e1_${SARX_E1_INJURY}_frames
+                    --frames 40
+                    --fps 30
+                    --voxel-size 0.045
+                    --require-damage
+                    --require-detachment
+                    --require-substitution
+                    --require-contact
+                    --require-authority
+                    --require-isolation
+                    --require-continuity
+            )
+        endforeach()
 
         add_test(
             NAME sarx_real_character_voxel_smoke

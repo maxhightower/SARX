@@ -402,7 +402,9 @@ void DetachedArticulatedChain::step(
                         particle_ids_[segment]],
                     particles[
                         particle_ids_[segment + 1]],
-                    config_.ground_radius);
+                    segment < config_.segment_ground_radii.size()
+                        ? config_.segment_ground_radii[segment]
+                        : config_.ground_radius);
 
             if (hit) {
                 touched[segment] = true;

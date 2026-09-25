@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "research/**"
+      - "claude/sarx-m2e1-**"
   pull_request:
 
 jobs:

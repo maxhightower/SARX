@@ -5,12 +5,14 @@ on:
   push:
     branches:
       - "research/m2-action-substitution-v1"
+      - "claude/sarx-m2e1-**"
     paths:
       - "tools/sarx_character_voxel_arm_loss_attack_demo.cpp"
-      - "tools/sarx_character_voxel_attack_substitution_demo.cpp"
       - "src/action_capability.cpp"
       - "src/action_substitution.cpp"
       - "src/animation_authority.cpp"
+      - "src/detached_articulation.cpp"
+      - "src/character_render.cpp"
       - "src/gltf_character.cpp"
       - "src/voxel_character.cpp"
       - "include/sarx/**"
@@ -33,64 +35,111 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DSARX_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build action fixtures
-        run: |
-          cmake --build build --config Release --target sarx_character_voxel_arm_loss_attack_demo
-          cmake --build build --config Release --target sarx_character_voxel_attack_substitution_demo
+      - name: Build action fixture
+        run: cmake --build build --config Release --target sarx_character_voxel_arm_loss_attack_demo
 
-      - name: Render whole-arm substitution
+      # E1-B: whole left arm severed mid-Jab -> opposite authored Punch_Cross.
+      # The sever frame is derived inside the fixture from the audited Jab
+      # semantics (no --cut-frame): midpoint of [commitment, contact begin).
+      - name: Render E1-B whole-arm substitution
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/evidence
 
+          gates="--require-damage --require-detachment --require-substitution --require-contact --require-authority --require-isolation --require-continuity"
+
           ./build/sarx_character_voxel_arm_loss_attack_demo \
             --character assets/quaternius/character.glb \
             --animations assets/quaternius/animations.glb \
-            --output build/arm_loss_frames \
-            --frames 120 \
-            --cut-frame 5 \
-            --fps 30 \
-            --voxel-size 0.045 \
-            --require-damage \
-            --require-detachment \
-            --require-substitution \
-            --require-contact \
-            --require-authority \
-            --require-isolation \
-            2>&1 | tee build/evidence/v17c-arm-loss.log
+            --injury whole-arm \
+            --output build/e1b_frames \
+            --frames 120 --fps 30 --voxel-size 0.045 \
+            ${gates} \
+            --evidence build/evidence/e1b-frames.tsv \
+            2>&1 | tee build/evidence/e1b.log
 
-      - name: Encode whole-arm evidence
+          # Determinism: an independent second run must reproduce the digest.
+          ./build/sarx_character_voxel_arm_loss_attack_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --injury whole-arm \
+            --output build/e1b_frames_replay \
+            --frames 120 --fps 30 --voxel-size 0.045 \
+            ${gates} \
+            > build/evidence/e1b-replay.log 2>&1
+
+          a="$(grep determinism_digest build/evidence/e1b.log)"
+          b="$(grep determinism_digest build/evidence/e1b-replay.log)"
+          echo "first:  ${a}"
+          echo "replay: ${b}"
+          test "${a}" = "${b}"
+
+      # E1-A: left hand severed at the committed Jab phase. Without a
+      # certified authored elbow clip the planner must identify the elbow as
+      # the preferred-but-blocked continuation and fall back to the Cross.
+      - name: Render E1-A hand-loss (elbow asset gate)
         shell: bash
         run: |
           set -euo pipefail
-          ffmpeg -nostdin -y \
-            -framerate 30 \
-            -i build/arm_loss_frames/frame_%04d.ppm \
-            -c:v libx264 \
-            -pix_fmt yuv420p \
-            -crf 20 \
-            build/evidence/v17c_quaternius_arm_loss_to_opposite_cross.mp4
+
+          ./build/sarx_character_voxel_arm_loss_attack_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --injury hand \
+            --output build/e1a_frames \
+            --frames 120 --fps 30 --voxel-size 0.045 \
+            --require-damage --require-detachment --require-substitution \
+            --require-contact --require-authority --require-isolation \
+            --require-continuity \
+            --evidence build/evidence/e1a-blocked-frames.tsv \
+            2>&1 | tee build/evidence/e1a-blocked.log
+
+          set +e
+          ./build/sarx_character_voxel_arm_loss_attack_demo \
+            --character assets/quaternius/character.glb \
+            --animations assets/quaternius/animations.glb \
+            --injury hand \
+            --output build/e1a_strict_frames \
+            --frames 12 --fps 30 --voxel-size 0.045 \
+            --require-authored-elbow \
+            > build/evidence/e1a-strict.log 2>&1
+          status=$?
+          set -e
+
+          if [[ "${status}" == "0" ]]; then
+            echo "E1A_STATUS=PASS_CANDIDATE (authored elbow bound; requires visual review)" | tee build/evidence/e1a-status.txt
+          else
+            echo "E1A_STATUS=BLOCKED_ON_AUTHORED_ELBOW_MOTION" | tee build/evidence/e1a-status.txt
+          fi
+
+      - name: Encode evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pair in "e1b_frames:m2e1_b_quaternius_arm_loss_to_opposite_cross" \
+                      "e1a_frames:m2e1_a_quaternius_hand_loss_elbow_blocked_fallback"; do
+            frames="${pair%%:*}"
+            name="${pair##*:}"
+            ffmpeg -nostdin -y -framerate 30 \
+              -i "build/${frames}/frame_%04d.ppm" \
+              -c:v libx264 -pix_fmt yuv420p -crf 20 \
+              "build/evidence/${name}.mp4"
+          done
 
       - name: Record provenance
         shell: bash
         run: |
           {
             echo "commit=${GITHUB_SHA}"
-            echo "base_action=Punch_Jab"
-            echo "audited_base_effector=LeftHand"
-            echo "replacement_action=Punch_Cross"
-            echo "audited_replacement_effector=RightHand"
-            echo
-            cat build/evidence/v17c-arm-loss.log
-          } > build/evidence/v17c-provenance.txt
+            echo "character=assets/quaternius/character.glb"
+            echo "E1-B base_action=Punch_Jab (LeftHand) replacement=Punch_Cross (RightHand)"
+            cat build/evidence/e1a-status.txt
+          } > build/evidence/m2e1-provenance.txt
 
       - name: Upload evidence
         uses: actions/upload-artifact@v4
         with:
           name: sarx-m2e1-action-substitution-media
-          path: |
-            build/evidence/v17c_quaternius_arm_loss_to_opposite_cross.mp4
-            build/evidence/v17c-arm-loss.log
-            build/evidence/v17c-provenance.txt
+          path: build/evidence/
           if-no-files-found: error

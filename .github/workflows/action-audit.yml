@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - "research/m2-action-substitution-v1"
+      - "claude/sarx-m2e1-**"
     paths:
       - "tools/sarx_character_action_audit.cpp"
       - "CMakeLists.txt"

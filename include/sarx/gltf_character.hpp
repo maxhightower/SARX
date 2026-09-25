@@ -14,6 +14,9 @@ namespace sarx {
 struct CharacterMeshFrame {
     std::vector<Vec3> positions;
     std::vector<std::uint32_t> indices;
+    // Optional evidence tag per triangle (0 = body, 1 = physics-owned
+    // detached anatomy, 2 = target). Empty means every triangle is body.
+    std::vector<std::uint8_t> triangle_tags;
 };
 
 struct CharacterSplitFrame {

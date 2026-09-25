@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace sarx {
@@ -175,6 +176,213 @@ std::size_t AnimationAuthorityPlan::count(
             }));
 }
 
+AuthoredAuthorityAnalysis
+derive_authored_authority_root(
+    const GltfCharacter& character,
+    std::size_t animation,
+    const std::string& effector_joint,
+    double contribution_fraction,
+    double sample_rate) {
+
+    AuthoredAuthorityAnalysis analysis;
+    analysis.effector_joint = effector_joint;
+
+    const auto& joints =
+        character.skin_joints();
+
+    std::unordered_map<std::string, std::size_t> by_name;
+    for (std::size_t i = 0; i < joints.size(); ++i) {
+        by_name.emplace(joints[i].name, i);
+    }
+
+    if (by_name.find(effector_joint) == by_name.end()) {
+        throw std::runtime_error(
+            "authored authority effector joint not in skeleton: "
+            + effector_joint);
+    }
+
+    std::vector<std::string> chain;
+    for (std::string current = effector_joint;
+         !current.empty();) {
+        const auto found = by_name.find(current);
+        if (found == by_name.end()
+            || chain.size() > joints.size()) {
+            break;
+        }
+        chain.push_back(current);
+        current = joints[found->second].parent;
+    }
+
+    const double duration =
+        character.animation_duration(animation);
+
+    const int samples =
+        std::max(
+            2,
+            static_cast<int>(
+                std::ceil(duration * sample_rate))
+                + 1);
+
+    const auto first =
+        character.sample_node_local_poses(
+            animation, 0.0, false);
+
+    std::unordered_map<std::string, CharacterNodeLocalPose> first_by_name;
+    for (const auto& pose : first) {
+        first_by_name.emplace(pose.name, pose);
+    }
+
+    const Vec3 effector_start =
+        character.node_world_position_with_local_poses(
+            first, effector_joint);
+
+    std::vector<double> contribution(
+        chain.size(), 0.0);
+
+    for (int s = 0; s < samples; ++s) {
+        const double time =
+            duration * static_cast<double>(s)
+            / static_cast<double>(samples - 1);
+
+        const auto poses =
+            character.sample_node_local_poses(
+                animation, time, false);
+
+        const Vec3 effector =
+            character.node_world_position_with_local_poses(
+                poses, effector_joint);
+
+        analysis.effector_travel =
+            std::max(
+                analysis.effector_travel,
+                length(effector - effector_start));
+
+        for (std::size_t c = 0; c < chain.size(); ++c) {
+            auto frozen = poses;
+            for (auto& pose : frozen) {
+                if (pose.name == chain[c]) {
+                    const auto found = first_by_name.find(pose.name);
+                    if (found != first_by_name.end()) {
+                        pose = found->second;
+                    }
+                }
+            }
+
+            const Vec3 frozen_effector =
+                character.node_world_position_with_local_poses(
+                    frozen, effector_joint);
+
+            contribution[c] =
+                std::max(
+                    contribution[c],
+                    length(frozen_effector - effector));
+        }
+    }
+
+    analysis.contribution_threshold =
+        analysis.effector_travel * contribution_fraction;
+
+    analysis.authority_root = effector_joint;
+
+    for (std::size_t c = 0; c < chain.size(); ++c) {
+        analysis.chain.push_back(
+            {chain[c], contribution[c]});
+
+        if (contribution[c]
+            >= analysis.contribution_threshold) {
+            analysis.authority_root = chain[c];
+        }
+    }
+
+    return analysis;
+}
+
+std::vector<std::string>
+physics_joint_roots_from_voxels(
+    const std::vector<CharacterJointInfo>& joints,
+    const VoxelizedCharacter& voxels,
+    const std::vector<DetachedVoxelComponent>& detached_components) {
+
+    std::unordered_map<std::string, std::size_t> total;
+    std::unordered_map<std::string, std::size_t> not_attached;
+    std::unordered_map<std::string, std::size_t> in_component;
+
+    for (const auto& voxel : voxels.voxels()) {
+        const auto& joint = voxel.skin_binding.dominant_joint;
+        ++total[joint];
+        if (voxel.state != CharacterVoxelState::Attached) {
+            ++not_attached[joint];
+        }
+    }
+
+    for (const auto& component : detached_components) {
+        for (const auto index : component.voxel_indices) {
+            ++in_component[
+                voxels.voxels()[index].skin_binding.dominant_joint];
+        }
+    }
+
+    std::unordered_map<std::string, bool> physics;
+    for (const auto& joint : joints) {
+        const std::size_t count = total[joint.name];
+        physics[joint.name] =
+            count > 0
+            && in_component[joint.name] > 0
+            && not_attached[joint.name] * 2 > count;
+    }
+
+    std::unordered_map<std::string, std::size_t> by_name;
+    for (std::size_t i = 0; i < joints.size(); ++i) {
+        by_name.emplace(joints[i].name, i);
+    }
+
+    std::vector<std::string> roots;
+    for (const auto& joint : joints) {
+        if (!physics[joint.name]) {
+            continue;
+        }
+
+        // Skip if any ancestor is already physics-owned.
+        bool nested = false;
+        std::string parent = joint.parent;
+        std::size_t guard = 0;
+        while (!parent.empty() && guard++ <= joints.size()) {
+            if (physics[parent]) {
+                nested = true;
+                break;
+            }
+            const auto found = by_name.find(parent);
+            if (found == by_name.end()) {
+                break;
+            }
+            parent = joints[found->second].parent;
+        }
+
+        if (!nested) {
+            roots.push_back(joint.name);
+        }
+    }
+
+    return roots;
+}
+
+AnimationAuthoritySource authority_source_for(
+    const AnimationAuthorityPlan& plan,
+    const std::string& joint) {
+
+    const auto found =
+        std::find_if(
+            plan.joints.begin(),
+            plan.joints.end(),
+            [&](const JointAuthorityAssignment& assignment) {
+                return assignment.joint == joint;
+            });
+
+    return found == plan.joints.end()
+        ? AnimationAuthoritySource::Disabled
+        : found->source;
+}
+
 AnimationAuthorityPlan
 build_action_authority_plan(
     const std::vector<CharacterJointInfo>& joints,
@@ -242,7 +450,8 @@ compose_action_local_poses(
     const std::vector<CharacterNodeLocalPose>& base,
     const std::vector<CharacterNodeLocalPose>& replacement,
     const AnimationAuthorityPlan& authority,
-    double replacement_blend) {
+    double replacement_blend,
+    const std::vector<CharacterNodeLocalPose>& physics_hold) {
 
     const double blend =
         std::clamp(
@@ -276,6 +485,13 @@ compose_action_local_poses(
             assignment.source);
     }
 
+    std::unordered_map<std::string, const CharacterNodeLocalPose*>
+        hold_by_name;
+
+    for (const auto& pose : physics_hold) {
+        hold_by_name.emplace(pose.name, &pose);
+    }
+
     std::vector<CharacterNodeLocalPose>
         output = base;
 
@@ -283,6 +499,18 @@ compose_action_local_poses(
         const auto authority_it =
             authority_by_name.find(
                 pose.name);
+
+        if (authority_it != authority_by_name.end()
+            && authority_it->second
+                == AnimationAuthoritySource::Physics) {
+            const auto hold_it = hold_by_name.find(pose.name);
+            if (hold_it != hold_by_name.end()) {
+                pose.translation = hold_it->second->translation;
+                pose.rotation = hold_it->second->rotation;
+                pose.scale = hold_it->second->scale;
+            }
+            continue;
+        }
 
         if (authority_it
                 == authority_by_name.end()

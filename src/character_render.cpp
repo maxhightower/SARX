@@ -435,8 +435,28 @@ void write_character_ppm(
                             s2.y
                         }))));
 
-        const Color color =
+        Color color =
             shaded_character_color(normal);
+
+        const std::size_t triangle_index = triangle / 3;
+
+        if (triangle_index < frame.triangle_tags.size()
+            && frame.triangle_tags[triangle_index] != 0) {
+            // Evidence tint: keep the Lambert shading, shift the hue.
+            const double shade =
+                (static_cast<double>(color.r) - 78.0) / 105.0;
+            if (frame.triangle_tags[triangle_index] == 1) {
+                color = {
+                    static_cast<std::uint8_t>(std::lround(150.0 + 95.0 * shade)),
+                    static_cast<std::uint8_t>(std::lround(80.0 + 70.0 * shade)),
+                    static_cast<std::uint8_t>(std::lround(30.0 + 40.0 * shade))};
+            } else {
+                color = {
+                    static_cast<std::uint8_t>(std::lround(120.0 + 80.0 * shade)),
+                    static_cast<std::uint8_t>(std::lround(40.0 + 40.0 * shade)),
+                    static_cast<std::uint8_t>(std::lround(50.0 + 40.0 * shade))};
+            }
+        }
 
         for (int y = min_y;
              y <= max_y;

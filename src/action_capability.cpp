@@ -41,6 +41,8 @@ ActionCapability make_hand_punch_capability(
         capability.contact_regions = {
             "hand_l"
         };
+
+        capability.effector_joint = "hand_l";
     } else {
         capability.side =
             ActionSide::Right;
@@ -70,6 +72,8 @@ ActionCapability make_hand_punch_capability(
         capability.contact_regions = {
             "hand_r"
         };
+
+        capability.effector_joint = "hand_r";
     }
 
     return capability;
@@ -97,6 +101,14 @@ ActionCapability make_elbow_strike_capability(
             {"lowerarm_l", 0.15}
         };
 
+        // Same optional guard/counter-rotation support as a punch, so a lost
+        // opposite arm degrades every upper-limb strike equally rather than
+        // making elbows look anatomically "cleaner" than hand strikes.
+        capability.optional_regions = {
+            {"upperarm_r", 0.35},
+            {"lowerarm_r", 0.35}
+        };
+
         capability.authority_joint_roots = {
             "clavicle_l",
             "upperarm_l",
@@ -107,6 +119,9 @@ ActionCapability make_elbow_strike_capability(
             "upperarm_l",
             "lowerarm_l"
         };
+
+        // The elbow point is the origin of the lower-arm joint.
+        capability.effector_joint = "lowerarm_l";
     } else {
         capability.side =
             ActionSide::Right;
@@ -121,6 +136,11 @@ ActionCapability make_elbow_strike_capability(
             {"lowerarm_r", 0.15}
         };
 
+        capability.optional_regions = {
+            {"upperarm_l", 0.35},
+            {"lowerarm_l", 0.35}
+        };
+
         capability.authority_joint_roots = {
             "clavicle_r",
             "upperarm_r",
@@ -131,6 +151,8 @@ ActionCapability make_elbow_strike_capability(
             "upperarm_r",
             "lowerarm_r"
         };
+
+        capability.effector_joint = "lowerarm_r";
     }
 
     capability.contact_phase_begin = 0.55;
@@ -202,6 +224,48 @@ ActionCapability describe_authored_action(
     }
 
     return ActionCapability{};
+}
+
+std::vector<ActionCapability>
+quaternius_attack_action_library() {
+    std::vector<ActionCapability> library = {
+        describe_authored_action("Punch_Jab"),
+        describe_authored_action("Punch_Cross")
+    };
+
+    // No legally usable, visually certified authored elbow strike exists
+    // yet (see docs/m2e1_combat_motion_sources.md). The slots stay in the
+    // library so the planner can explain that the preferred same-side
+    // continuation is blocked on authored motion, not on anatomy.
+    for (const ActionSide side
+         : {ActionSide::Left, ActionSide::Right}) {
+
+        auto elbow =
+            make_elbow_strike_capability(
+                side == ActionSide::Left
+                    ? "ElbowStrike_Left_Uncertified"
+                    : "ElbowStrike_Right_Uncertified",
+                side);
+
+        elbow.authored_motion_available = false;
+        elbow.availability_note =
+            "no certified authored elbow-strike clip";
+
+        library.push_back(
+            std::move(elbow));
+    }
+
+    return library;
+}
+
+ActionCapability bind_authored_motion(
+    ActionCapability capability,
+    const std::string& motion_id) {
+
+    capability.motion_id = motion_id;
+    capability.authored_motion_available = !motion_id.empty();
+    capability.availability_note.clear();
+    return capability;
 }
 
 MotionViabilityResult evaluate_action_viability(

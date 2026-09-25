@@ -2485,6 +2485,539 @@ void test_humanoid_shoulder_cut_detaches_arm_cleanly() {
 
 } // namespace
 
+std::vector<sarx::AnatomicalAvailability> intact_upper_body() {
+    return {
+        {"pelvis", 100, 100},
+        {"spine_01", 100, 100},
+        {"upperarm_l", 100, 100},
+        {"lowerarm_l", 100, 100},
+        {"hand_l", 100, 100},
+        {"upperarm_r", 100, 100},
+        {"lowerarm_r", 100, 100},
+        {"hand_r", 100, 100}
+    };
+}
+
+void set_attached(
+    std::vector<sarx::AnatomicalAvailability>& anatomy,
+    const std::string& region,
+    std::size_t attached) {
+
+    for (auto& entry : anatomy) {
+        if (entry.region == region) {
+            entry.attached_voxels = attached;
+        }
+    }
+}
+
+const sarx::ActionCandidateScore* trace_entry(
+    const sarx::ActionSubstitutionPlan& plan,
+    sarx::ActionFamily family,
+    sarx::ActionSide side) {
+
+    for (const auto& entry : plan.trace) {
+        if (entry.capability.family == family
+            && entry.capability.side == side) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+sarx::ActionCapability library_action(
+    sarx::ActionFamily family,
+    sarx::ActionSide side) {
+
+    for (const auto& capability
+         : sarx::quaternius_attack_action_library()) {
+        if (capability.family == family
+            && capability.side == side) {
+            return capability;
+        }
+    }
+    return {};
+}
+
+void test_attack_library_binds_audited_clips_and_blocks_uncertified_elbows() {
+    const auto library =
+        sarx::quaternius_attack_action_library();
+
+    std::size_t available = 0;
+    std::size_t elbows = 0;
+
+    for (const auto& capability : library) {
+        if (capability.authored_motion_available) {
+            ++available;
+            check(
+                capability.family == sarx::ActionFamily::Punch
+                    && !capability.effector_joint.empty(),
+                "only audited Quaternius punches may be executable library entries");
+        }
+        if (capability.family == sarx::ActionFamily::ElbowStrike) {
+            ++elbows;
+            check(
+                !capability.authored_motion_available
+                    && !capability.availability_note.empty(),
+                "elbow slots must stay blocked until an authored clip is certified");
+        }
+    }
+
+    check(
+        available == 2 && elbows == 2,
+        "library must hold Jab/Cross plus both uncertified elbow slots");
+
+    const auto bound =
+        sarx::bind_authored_motion(
+            library_action(
+                sarx::ActionFamily::ElbowStrike,
+                sarx::ActionSide::Left),
+            "Certified_Elbow_Left");
+
+    check(
+        bound.authored_motion_available
+            && bound.motion_id == "Certified_Elbow_Left"
+            && bound.family == sarx::ActionFamily::ElbowStrike
+            && bound.effector_joint == "lowerarm_l",
+        "binding a certified clip must keep the slot's anatomical semantics");
+}
+
+void test_committed_hand_loss_identifies_elbow_but_blocks_uncertified_motion() {
+    auto anatomy = intact_upper_body();
+    set_attached(anatomy, "hand_l", 0);
+
+    const auto jab =
+        library_action(sarx::ActionFamily::Punch, sarx::ActionSide::Left);
+
+    sarx::ActionExecutionState committed;
+    committed.motion_id = jab.motion_id;
+    committed.normalized_phase = 0.16;
+
+    const auto plan =
+        sarx::plan_action_substitution(
+            sarx::BehavioralIntent::Attack,
+            jab,
+            sarx::quaternius_attack_action_library(),
+            anatomy,
+            committed);
+
+    const auto* elbow =
+        trace_entry(plan, sarx::ActionFamily::ElbowStrike, sarx::ActionSide::Left);
+
+    check(
+        elbow
+            && elbow->disposition
+                == sarx::ActionCandidateDisposition::RejectedAuthoredMotionUnavailable
+            && elbow->viability.state != sarx::MotionViability::Invalid,
+        "committed hand loss: left elbow is anatomically viable but has no authored motion");
+
+    check(
+        plan.preferred_blocked_on_authored_motion
+            && plan.preferred_unavailable.capability.family
+                == sarx::ActionFamily::ElbowStrike
+            && plan.preferred_unavailable.capability.side
+                == sarx::ActionSide::Left,
+        "planner must report the same-side elbow as the desired but blocked continuation");
+
+    check(
+        plan.selected.family == sarx::ActionFamily::Punch
+            && plan.selected.side == sarx::ActionSide::Right
+            && plan.selected.authored_motion_available,
+        "without a certified elbow the executable fallback is the opposite Cross, never a fake elbow");
+}
+
+void test_precommit_hand_loss_prefers_opposite_hand_without_blocked_elbow() {
+    auto anatomy = intact_upper_body();
+    set_attached(anatomy, "hand_l", 0);
+
+    const auto jab =
+        library_action(sarx::ActionFamily::Punch, sarx::ActionSide::Left);
+
+    sarx::ActionExecutionState early;
+    early.motion_id = jab.motion_id;
+    early.normalized_phase = 0.02;
+
+    auto library = sarx::quaternius_attack_action_library();
+    for (auto& capability : library) {
+        if (capability.family == sarx::ActionFamily::ElbowStrike) {
+            capability = sarx::bind_authored_motion(
+                capability, capability.motion_id + "_Bound");
+        }
+    }
+
+    const auto plan =
+        sarx::plan_action_substitution(
+            sarx::BehavioralIntent::Attack,
+            jab,
+            library,
+            anatomy,
+            early);
+
+    check(
+        plan.selected.family == sarx::ActionFamily::Punch
+            && plan.selected.side == sarx::ActionSide::Right
+            && !plan.preferred_blocked_on_authored_motion,
+        "pre-commit hand loss prefers the healthy opposite hand even when an elbow is bound");
+
+    sarx::ActionExecutionState committed = early;
+    committed.normalized_phase = 0.16;
+
+    const auto committed_plan =
+        sarx::plan_action_substitution(
+            sarx::BehavioralIntent::Attack,
+            jab,
+            library,
+            anatomy,
+            committed);
+
+    check(
+        committed_plan.selected.family == sarx::ActionFamily::ElbowStrike
+            && committed_plan.selected.side == sarx::ActionSide::Left,
+        "once bound, a committed hand loss selects the same-side elbow (mechanical E1-A integration)");
+}
+
+void test_whole_arm_loss_rejects_both_same_side_chains_with_reasons() {
+    for (const auto side : {sarx::ActionSide::Left, sarx::ActionSide::Right}) {
+        const bool left = side == sarx::ActionSide::Left;
+        const std::string s = left ? "_l" : "_r";
+
+        auto anatomy = intact_upper_body();
+        set_attached(anatomy, "upperarm" + s, 5);
+        set_attached(anatomy, "lowerarm" + s, 0);
+        set_attached(anatomy, "hand" + s, 0);
+
+        const auto punch =
+            library_action(sarx::ActionFamily::Punch, side);
+
+        auto library = sarx::quaternius_attack_action_library();
+        for (auto& capability : library) {
+            if (capability.family == sarx::ActionFamily::ElbowStrike) {
+                capability = sarx::bind_authored_motion(
+                    capability, capability.motion_id + "_Bound");
+            }
+        }
+
+        sarx::ActionExecutionState committed;
+        committed.motion_id = punch.motion_id;
+        committed.normalized_phase = 0.16;
+
+        const auto plan =
+            sarx::plan_action_substitution(
+                sarx::BehavioralIntent::Attack,
+                punch,
+                library,
+                anatomy,
+                committed);
+
+        const auto* elbow =
+            trace_entry(plan, sarx::ActionFamily::ElbowStrike, side);
+
+        check(
+            elbow
+                && elbow->disposition
+                    == sarx::ActionCandidateDisposition::RejectedAnatomy
+                && std::find(
+                       elbow->viability.failed_regions.begin(),
+                       elbow->viability.failed_regions.end(),
+                       "upperarm" + s)
+                    != elbow->viability.failed_regions.end(),
+            "whole-arm loss rejects the same-side elbow for missing upper arm, even when bound");
+
+        check(
+            plan.selected.family == sarx::ActionFamily::Punch
+                && plan.selected.side
+                    == (left ? sarx::ActionSide::Right : sarx::ActionSide::Left),
+            "whole-arm loss selects the opposite healthy punch (side-symmetric)");
+    }
+}
+
+void test_elbow_viability_boundary_is_driven_by_surviving_forearm() {
+    for (const auto side : {sarx::ActionSide::Left, sarx::ActionSide::Right}) {
+        const std::string s =
+            side == sarx::ActionSide::Left ? "_l" : "_r";
+
+        const auto elbow =
+            sarx::make_elbow_strike_capability("Elbow" + s, side);
+
+        double requirement = -1.0;
+        for (const auto& r : elbow.required_regions) {
+            if (r.region == "lowerarm" + s) {
+                requirement = r.minimum_attached_fraction;
+            }
+        }
+        check(
+            std::abs(requirement - 0.15) < 1e-12,
+            "elbow lower-arm requirement must remain the audited 15% proximal stump");
+
+        auto at = intact_upper_body();
+        set_attached(at, "hand" + s, 0);
+        set_attached(at, "lowerarm" + s, 15);
+
+        auto below = at;
+        set_attached(below, "lowerarm" + s, 14);
+
+        check(
+            sarx::evaluate_action_viability(elbow, at).state
+                != sarx::MotionViability::Invalid,
+            "exactly 15/100 surviving forearm voxels keeps the elbow viable");
+
+        check(
+            sarx::evaluate_action_viability(elbow, below).state
+                == sarx::MotionViability::Invalid,
+            "14/100 surviving forearm voxels invalidates the elbow");
+
+        // Damage elsewhere on the same arm, with the chain intact, must not
+        // invalidate the elbow: viability is anatomical, not "arm damaged".
+        auto damaged_but_connected = intact_upper_body();
+        set_attached(damaged_but_connected, "hand" + s, 0);
+        set_attached(damaged_but_connected, "upperarm" + s, 70);
+        set_attached(damaged_but_connected, "lowerarm" + s, 40);
+
+        check(
+            sarx::evaluate_action_viability(elbow, damaged_but_connected).state
+                != sarx::MotionViability::Invalid,
+            "a damaged but sufficient elbow chain stays viable");
+    }
+}
+
+void test_no_surviving_attack_chain_fails_intent_safely() {
+    auto anatomy = intact_upper_body();
+    for (const auto* region :
+         {"upperarm_l", "lowerarm_l", "hand_l",
+          "upperarm_r", "lowerarm_r", "hand_r"}) {
+        set_attached(anatomy, region, 0);
+    }
+
+    auto library = sarx::quaternius_attack_action_library();
+    for (auto& capability : library) {
+        capability.authored_motion_available = true;
+    }
+
+    const auto jab =
+        library_action(sarx::ActionFamily::Punch, sarx::ActionSide::Left);
+
+    sarx::ActionExecutionState committed;
+    committed.motion_id = jab.motion_id;
+    committed.normalized_phase = 0.2;
+
+    const auto plan =
+        sarx::plan_action_substitution(
+            sarx::BehavioralIntent::Attack,
+            jab,
+            library,
+            anatomy,
+            committed);
+
+    check(
+        plan.transition_required
+            && plan.intent_failed
+            && plan.selected.motion_id.empty()
+            && plan.selected.family == sarx::ActionFamily::Unknown
+            && plan.candidates.empty(),
+        "no surviving upper-limb chain must fail intent without selecting any strike");
+
+    for (const auto& entry : plan.trace) {
+        check(
+            entry.disposition
+                    == sarx::ActionCandidateDisposition::RejectedAnatomy
+                || entry.disposition
+                    == sarx::ActionCandidateDisposition::RejectedCurrentAction,
+            "every candidate must be rejected for anatomy when both arms are gone");
+    }
+
+    sarx::ActionExecutionController controller(
+        sarx::BehavioralIntent::Attack, jab, library);
+
+    check(
+        controller.update(1, anatomy, 0.2)
+            && controller.status()
+                == sarx::ActionExecutionController::Status::IntentFailed
+            && controller.active().motion_id.empty(),
+        "controller must fail the intent safely instead of animating a phantom limb");
+
+    check(
+        !controller.update(2, intact_upper_body(), 0.0)
+            && controller.active().motion_id.empty(),
+        "a failed intent must not be resurrected by restored anatomy data");
+}
+
+void test_second_injury_replans_the_substitute() {
+    auto library = sarx::quaternius_attack_action_library();
+    for (auto& capability : library) {
+        if (capability.family == sarx::ActionFamily::ElbowStrike) {
+            capability = sarx::bind_authored_motion(
+                capability, capability.motion_id + "_Bound");
+        }
+    }
+
+    const auto jab =
+        library_action(sarx::ActionFamily::Punch, sarx::ActionSide::Left);
+
+    sarx::ActionExecutionController controller(
+        sarx::BehavioralIntent::Attack, jab, library);
+
+    auto anatomy = intact_upper_body();
+
+    check(
+        !controller.update(0, anatomy, 0.0)
+            && controller.active().motion_id == jab.motion_id,
+        "intact anatomy keeps the original action");
+
+    // First injury: committed left-hand loss -> left elbow.
+    set_attached(anatomy, "hand_l", 0);
+
+    check(
+        controller.update(5, anatomy, 0.16)
+            && controller.active().family == sarx::ActionFamily::ElbowStrike
+            && controller.active().side == sarx::ActionSide::Left,
+        "first injury substitutes the same-side elbow");
+
+    // Second injury during the elbow: forearm destroyed below the stump
+    // threshold -> the elbow is invalid, replan to the right Cross.
+    set_attached(anatomy, "lowerarm_l", 5);
+
+    check(
+        controller.update(9, anatomy, 0.3)
+            && controller.active().family == sarx::ActionFamily::Punch
+            && controller.active().side == sarx::ActionSide::Right,
+        "second injury invalidates the substitute and replans to the opposite punch");
+
+    // Third injury: right hand gone mid-Cross -> right elbow (bound).
+    set_attached(anatomy, "hand_r", 0);
+
+    check(
+        controller.update(12, anatomy, 0.2)
+            && controller.active().family == sarx::ActionFamily::ElbowStrike
+            && controller.active().side == sarx::ActionSide::Right,
+        "third injury can substitute again; substitution is not single-shot");
+
+    check(
+        controller.transitions().size() == 3
+            && controller.transitions()[1].from_motion
+                == library_action(
+                       sarx::ActionFamily::ElbowStrike,
+                       sarx::ActionSide::Left).motion_id + "_Bound",
+        "every re-plan is recorded with its source action");
+
+    for (const auto& transition : controller.transitions()) {
+        check(
+            transition.to_motion != jab.motion_id,
+            "an action abandoned for anatomy is never reselected");
+    }
+}
+
+void test_physics_hold_blocks_base_and_replacement_on_detached_joints() {
+    const std::vector<sarx::CharacterJointInfo> joints = {
+        {"root", "", {}},
+        {"pelvis", "root", {}},
+        {"upperarm_l", "pelvis", {}},
+        {"lowerarm_l", "upperarm_l", {}},
+        {"hand_l", "lowerarm_l", {}},
+        {"index_01_l", "hand_l", {}},
+        {"upperarm_r", "pelvis", {}},
+        {"hand_r", "upperarm_r", {}}
+    };
+
+    auto cross =
+        sarx::make_hand_punch_capability("Cross", sarx::ActionSide::Right);
+    cross.authority_joint_roots = {"pelvis"};
+
+    const auto plan =
+        sarx::build_action_authority_plan(joints, cross, {"hand_l"});
+
+    check(
+        sarx::authority_source_for(plan, "hand_l")
+                == sarx::AnimationAuthoritySource::Physics
+            && sarx::authority_source_for(plan, "index_01_l")
+                == sarx::AnimationAuthoritySource::Physics
+            && sarx::authority_source_for(plan, "lowerarm_l")
+                == sarx::AnimationAuthoritySource::ReplacementAnimation
+            && sarx::authority_source_for(plan, "root")
+                == sarx::AnimationAuthoritySource::BaseAnimation,
+        "physics precedence must survive a replacement root that contains the detached branch");
+
+    auto pose_set = [&](double angle) {
+        std::vector<sarx::CharacterNodeLocalPose> poses;
+        for (const auto& joint : joints) {
+            sarx::CharacterNodeLocalPose pose;
+            pose.name = joint.name;
+            pose.parent = joint.parent;
+            pose.translation = {angle, 0.0, 0.0};
+            pose.rotation = {std::sin(angle * 0.5), 0.0, 0.0, std::cos(angle * 0.5)};
+            poses.push_back(pose);
+        }
+        return poses;
+    };
+
+    const auto hold = pose_set(0.1);
+
+    for (int step = 0; step < 5; ++step) {
+        const auto composed =
+            sarx::compose_action_local_poses(
+                pose_set(0.3 + 0.2 * step),
+                pose_set(-0.4 - 0.3 * step),
+                plan,
+                step == 0 ? 0.5 : 1.0,
+                hold);
+
+        for (std::size_t i = 0; i < composed.size(); ++i) {
+            if (sarx::authority_source_for(plan, composed[i].name)
+                != sarx::AnimationAuthoritySource::Physics) {
+                continue;
+            }
+            check(
+                composed[i].rotation == hold[i].rotation
+                    && composed[i].translation.x == hold[i].translation.x,
+                "detached joints must keep the detachment hold pose, never base or replacement channels");
+        }
+    }
+}
+
+void test_attack_capability_matrix_over_representative_injuries() {
+    struct Case {
+        const char* label;
+        std::vector<std::pair<const char*, std::size_t>> damage;
+        bool left_punch;
+        bool left_elbow;
+        bool right_punch;
+        bool right_elbow;
+    };
+
+    const std::vector<Case> cases = {
+        {"intact", {}, true, true, true, true},
+        {"left hand lost", {{"hand_l", 0}}, false, true, true, true},
+        {"left arm lost", {{"hand_l", 0}, {"lowerarm_l", 0}, {"upperarm_l", 5}},
+         false, false, true, true},
+        {"both hands lost", {{"hand_l", 0}, {"hand_r", 0}}, false, true, false, true},
+        {"all arms lost",
+         {{"hand_l", 0}, {"lowerarm_l", 0}, {"upperarm_l", 0},
+          {"hand_r", 0}, {"lowerarm_r", 0}, {"upperarm_r", 0}},
+         false, false, false, false}
+    };
+
+    for (const auto& c : cases) {
+        auto anatomy = intact_upper_body();
+        for (const auto& [region, attached] : c.damage) {
+            set_attached(anatomy, region, attached);
+        }
+
+        auto viable = [&](sarx::ActionFamily family, sarx::ActionSide side) {
+            return sarx::evaluate_action_viability(
+                       library_action(family, side), anatomy).state
+                != sarx::MotionViability::Invalid;
+        };
+
+        check(
+            viable(sarx::ActionFamily::Punch, sarx::ActionSide::Left) == c.left_punch
+                && viable(sarx::ActionFamily::ElbowStrike, sarx::ActionSide::Left)
+                    == c.left_elbow
+                && viable(sarx::ActionFamily::Punch, sarx::ActionSide::Right)
+                    == c.right_punch
+                && viable(sarx::ActionFamily::ElbowStrike, sarx::ActionSide::Right)
+                    == c.right_elbow,
+            std::string("attack capability matrix mismatch: ") + c.label);
+    }
+}
+
 int main() {
     test_compliant_animation_target();
     test_progressive_structural_damage();
@@ -2533,6 +3066,15 @@ int main() {
     test_attack_capability_distinguishes_hand_elbow_and_shoulder_loss();
     test_attack_authority_masks_detached_hand_from_replacement_animation();
     test_action_local_pose_compositor_replaces_only_authorized_chain();
+    test_attack_library_binds_audited_clips_and_blocks_uncertified_elbows();
+    test_committed_hand_loss_identifies_elbow_but_blocks_uncertified_motion();
+    test_precommit_hand_loss_prefers_opposite_hand_without_blocked_elbow();
+    test_whole_arm_loss_rejects_both_same_side_chains_with_reasons();
+    test_elbow_viability_boundary_is_driven_by_surviving_forearm();
+    test_no_surviving_attack_chain_fails_intent_safely();
+    test_second_injury_replans_the_substitute();
+    test_physics_hold_blocks_base_and_replacement_on_detached_joints();
+    test_attack_capability_matrix_over_representative_injuries();
     test_humanoid_shoulder_cut_detaches_arm_cleanly();
 
     if (failures != 0) {
