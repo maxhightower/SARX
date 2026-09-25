@@ -1,0 +1,54 @@
+fixture=E1-A hand_loss_committed_jab
+elbow_binding=<none certified>
+character=assets/quaternius/character.glb
+initial_action=Punch_Jab
+initial_effector=LeftHand
+declared_sever_phase=0.16 (midpoint of commitment_phase=0.08 and contact_phase_begin=0.24)
+sever_frame=4
+sever_phase_actual=0.153846
+region_lost=left hand at wrist (hand_l + fingers)
+attachment_before=upperarm_l=1,lowerarm_l=1,hand_l=1
+attachment_after=upperarm_l=1,lowerarm_l=1,hand_l=0
+arm_detached_frame=4
+physics_joint_roots=hand_l 
+original_action_invalidated_frame=4
+same_side_elbow=RejectedAuthoredMotionUnavailable: anatomy viable; no certified authored elbow-strike clip
+planner_trace=transition_required=1 intent_failed=0 selected=Punch_Cross current_failed_regions=hand_l | Punch_Jab [Punch/LeftHand] RejectedCurrentAction total=0 (invalidated current action) | Punch_Cross [Punch/RightHand] Selected total=0.922 (selected) | ElbowStrike_Left_Uncertified [ElbowStrike/LeftElbow] RejectedAuthoredMotionUnavailable total=1 (anatomy viable; no certified authored elbow-strike clip) | ElbowStrike_Right_Uncertified [ElbowStrike/RightElbow] RejectedAuthoredMotionUnavailable total=0.845 (anatomy viable; no certified authored elbow-strike clip) | preferred_blocked_on_authored_motion=ElbowStrike_Left_Uncertified
+selected_substitute=Punch_Cross
+substitute_effector=RightHand
+substitution_selected_frame=4
+replacement_engaged_frame=5
+authored_authority hand_l root=pelvis travel=0.491836 threshold=0.0491836 chain=hand_l:0,lowerarm_l:0.470366,upperarm_l:0.522835,clavicle_l:4.55225e-16,spine_03:0.318359,spine_02:0.0899554,spine_01:0,pelvis:0.192763,root:1.42286e-15,
+authored_authority hand_r root=pelvis travel=0.577697 threshold=0.0577697 chain=hand_r:0,lowerarm_r:0.48607,upperarm_r:0.614181,clavicle_r:0,spine_03:0.355347,spine_02:0.146032,spine_01:0,pelvis:0.23887,root:1.35064e-15,
+authority_base_joints=1
+authority_replacement_joints=43
+authority_physics_joints=21
+authority_by_joint=root:BaseAnimation,pelvis:ReplacementAnimation,spine_01:ReplacementAnimation,spine_02:ReplacementAnimation,spine_03:ReplacementAnimation,neck_01:ReplacementAnimation,Head:ReplacementAnimation,clavicle_l:ReplacementAnimation,upperarm_l:ReplacementAnimation,lowerarm_l:ReplacementAnimation,hand_l:Physics,index_01_l:Physics,index_02_l:Physics,index_03_l:Physics,index_04_leaf_l:Physics,middle_01_l:Physics,middle_02_l:Physics,middle_03_l:Physics,middle_04_leaf_l:Physics,pinky_01_l:Physics,pinky_02_l:Physics,pinky_03_l:Physics,pinky_04_leaf_l:Physics,ring_01_l:Physics,ring_02_l:Physics,ring_03_l:Physics,ring_04_leaf_l:Physics,thumb_01_l:Physics,thumb_02_l:Physics,thumb_03_l:Physics,thumb_04_leaf_l:Physics,clavicle_r:ReplacementAnimation,upperarm_r:ReplacementAnimation,lowerarm_r:ReplacementAnimation,hand_r:ReplacementAnimation,index_01_r:ReplacementAnimation,index_02_r:ReplacementAnimation,index_03_r:ReplacementAnimation,index_04_leaf_r:ReplacementAnimation,middle_01_r:ReplacementAnimation,middle_02_r:ReplacementAnimation,middle_03_r:ReplacementAnimation,middle_04_leaf_r:ReplacementAnimation,pinky_01_r:ReplacementAnimation,pinky_02_r:ReplacementAnimation,pinky_03_r:ReplacementAnimation,pinky_04_leaf_r:ReplacementAnimation,ring_01_r:ReplacementAnimation,ring_02_r:ReplacementAnimation,ring_03_r:ReplacementAnimation,ring_04_leaf_r:ReplacementAnimation,thumb_01_r:ReplacementAnimation,thumb_02_r:ReplacementAnimation,thumb_03_r:ReplacementAnimation,thumb_04_leaf_r:ReplacementAnimation,thigh_l:ReplacementAnimation,calf_l:ReplacementAnimation,foot_l:ReplacementAnimation,ball_l:ReplacementAnimation,ball_leaf_l:ReplacementAnimation,thigh_r:ReplacementAnimation,calf_r:ReplacementAnimation,foot_r:ReplacementAnimation,ball_r:ReplacementAnimation,ball_leaf_r:ReplacementAnimation,
+physics_pose_violations=0
+target=-0.0318875,1.35908,0.709387
+target_radius=0.180278
+min_target_distance=0.102926
+min_distance_substitute_phase=0.333333
+contact_frame=11
+contact_substitute_phase=0.233333
+substitute_contact_window=0.18,0.36
+contact_velocity=7.0152
+max_pelvis_frame_step=0.0526009 limit=0.0830354
+max_root_displacement=0
+max_lead_foot_drift=0.00249116 limit=0.0225
+camera_fixed=1
+detached_arm_ground_contacts=196
+detached_arm_initial_max_anchor_speed=0.233996
+detached_arm_travel=1.38381
+detached_arm_contact_radius=0.110878 segment_radii=0.110878,
+detached_arm_min_height=0.0269727
+detached_arm_rest_min_height=0.0269727
+detached_arm_final_centroid_height=0.100029
+detached_voxels_reattached=0
+detached_arm_elbow_delta=0
+unrelated_changed_voxels=0
+surviving_stump_voxels_distal_to_cut=0
+total_voxels=1673 destroyed=4 detached=25
+fractions upperarm_l=1 lowerarm_l=1 hand_l=0 upperarm_r=1 lowerarm_r=1 hand_r=1
+determinism_digest=f463d6bb912932c2
+gate_authority=1 gate_contact_in_window=1 gate_continuity=1 gate_detached_physical=1 gate_elbow_rejected_for_anatomy=0 elbow_blocked_on_authored_motion=1
