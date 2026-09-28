@@ -35,8 +35,12 @@ CharacterRuntime::CharacterRuntime(Body body, RuntimeConfig config)
     }
 
     home_bone_.assign(body_.particles().size(), kNoParent);
+    // A particle's first attachment defines its home bone (additional,
+    // blended attachments do not change its anatomical region).
     for (const auto& attachment : body_.attachments()) {
-        home_bone_[attachment.particle] = attachment.bone;
+        if (home_bone_[attachment.particle] == kNoParent) {
+            home_bone_[attachment.particle] = attachment.bone;
+        }
     }
 
     external_accel_.assign(body_.particles().size(), Vec3{});

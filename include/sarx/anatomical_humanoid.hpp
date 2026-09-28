@@ -37,6 +37,11 @@ struct AnatomicalHumanoidSpec {
     double attachment_break_damage{1.0};
     double joint_break_damage{1.0};
     double joint_radius{0.035};
+    // Particles whose nearest two skeletal segments belong to adjacent bones
+    // and are within this distance of each other get a second, blended
+    // attachment (skinning-style), so bent joints deform smoothly instead of
+    // shearing the lattice. 0 disables blending.
+    double joint_blend_width{0.05};
 };
 
 enum class DetailTissue : std::uint8_t {

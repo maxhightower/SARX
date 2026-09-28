@@ -320,20 +320,50 @@ HumanoidFixture build_anatomical_humanoid_fixture(const AnatomicalHumanoidSpec& 
         segments.push_back({ankle, f, f + Vec3{0.0, -0.05, 0.16}});
     }
 
+    auto adjacent = [&](BoneId a, BoneId c) {
+        return a != c && (bones[a].parent == c || bones[c].parent == a
+                          || (bones[a].parent != kNoParent && bones[a].parent == bones[c].parent));
+    };
+
     for (ParticleId id = 0; id < body.particles().size(); ++id) {
         const Vec3 q = body.particles()[id].position;
         const Segment* best = &segments.front();
+        const Segment* second = nullptr;
         double best_distance = std::numeric_limits<double>::infinity();
+        double second_distance = std::numeric_limits<double>::infinity();
         for (const auto& segment : segments) {
             const double d = segment_distance(q, segment.a, segment.b);
             if (d < best_distance) {
+                if (best->bone != segment.bone) {
+                    second = best;
+                    second_distance = best_distance;
+                }
                 best_distance = d;
                 best = &segment;
+            } else if (d < second_distance && segment.bone != best->bone) {
+                second_distance = d;
+                second = &segment;
             }
         }
+
+        // Primary attachment first: CharacterRuntime treats a particle's
+        // first attachment as its home bone (anatomical region).
+        double primary_weight = 1.0;
+        const bool blend = spec.joint_blend_width > 0.0 && second
+            && adjacent(best->bone, second->bone)
+            && second_distance - best_distance < spec.joint_blend_width;
+        if (blend) {
+            primary_weight = 0.5 + 0.5 * (second_distance - best_distance) / spec.joint_blend_width;
+        }
         const Vec3 anchor = bones[best->bone].animated_position;
-        body.add_attachment(id, best->bone, q - anchor, spec.attachment_compliance,
+        body.add_attachment(id, best->bone, q - anchor, spec.attachment_compliance / primary_weight,
                             spec.attachment_break_damage, spec.tissue_material);
+        if (blend) {
+            const Vec3 other = bones[second->bone].animated_position;
+            body.add_attachment(id, second->bone, q - other,
+                                spec.attachment_compliance / (1.0 - primary_weight),
+                                spec.attachment_break_damage, spec.tissue_material);
+        }
     }
 
     const auto& lm = anatomical_landmarks();

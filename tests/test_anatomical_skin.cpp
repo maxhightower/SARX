@@ -48,8 +48,12 @@ void test_anatomical_body_is_connected_and_proportioned() {
     const auto& r = h.runtime;
     check(r.islands().size() == 1 && r.islands().front().rig_authoritative,
           "anatomical body is a single rig island");
-    check(r.body().attachments().size() == r.body().particles().size(),
-          "every anatomical particle is attached to a bone");
+    std::vector<int> attached(r.body().particles().size(), 0);
+    for (const auto& a : r.body().attachments()) ++attached[a.particle];
+    check(std::all_of(attached.begin(), attached.end(), [](int n) { return n >= 1 && n <= 2; }),
+          "every anatomical particle has one attachment, or two near a joint");
+    check(r.body().attachments().size() > r.body().particles().size(),
+          "joint-region particles carry blended second attachments");
     check(r.islands().front().mass > 60.0 && r.islands().front().mass < 100.0,
           "anatomical body mass is human-scale");
     check(r.islands().front().bounds_max.y > 1.75 && r.islands().front().bounds_max.y < 1.85,
