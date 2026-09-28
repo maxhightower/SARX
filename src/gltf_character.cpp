@@ -1228,6 +1228,37 @@ double GltfCharacter::animation_duration(
     return impl_->clips[animation].duration;
 }
 
+std::vector<Vec3> GltfCharacter::sample_node_positions(
+    std::size_t animation,
+    double time_seconds,
+    const std::vector<std::string>& node_names,
+    bool loop) const {
+
+    if (animation >= impl_->clips.size()) {
+        throw std::out_of_range("animation index out of range");
+    }
+    const std::vector<Mat4> globals =
+        sampled_globals(impl_->rest_nodes, impl_->clips[animation], time_seconds, loop);
+
+    std::vector<Vec3> out;
+    out.reserve(node_names.size());
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    for (const auto& requested : node_names) {
+        std::string name = requested;
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        auto it = impl_->node_by_name.find(name);
+        if (it == impl_->node_by_name.end()) it = impl_->node_by_name.find(requested);
+        if (it == impl_->node_by_name.end() || it->second < 0
+            || static_cast<std::size_t>(it->second) >= globals.size()) {
+            out.push_back({nan, nan, nan});
+            continue;
+        }
+        out.push_back(transform_point(globals[static_cast<std::size_t>(it->second)], {0.0, 0.0, 0.0}));
+    }
+    return out;
+}
+
 std::vector<std::string>
 GltfCharacter::animation_target_nodes(
     std::size_t animation) const {

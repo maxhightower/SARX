@@ -47,8 +47,10 @@ CharacterRuntime::CharacterRuntime(Body body, RuntimeConfig config)
     all_attachments_ = iota_ids(body_.attachments());
 
     previous_bone_targets_.reserve(body_.bones().size());
+    previous_bone_rotations_.reserve(body_.bones().size());
     for (const auto& bone : body_.bones()) {
         previous_bone_targets_.push_back(bone.animated_position);
+        previous_bone_rotations_.push_back(bone.animated_rotation);
     }
 
     rebuild_topology(0);
@@ -467,18 +469,21 @@ void CharacterRuntime::step(double dt) {
     // resting in the last one (which would erase momentum at handoff).
     const std::size_t bone_count = body_.bones().size();
     std::vector<Vec3> desired_targets(bone_count);
+    std::vector<Rotation> desired_rotations(bone_count);
     for (BoneId b = 0; b < bone_count; ++b) {
         desired_targets[b] = body_.bones()[b].animated_position;
+        desired_rotations[b] = body_.bones()[b].animated_rotation;
     }
 
     for (int s = 0; s < substeps; ++s) {
         const double t =
             static_cast<double>(s + 1) / static_cast<double>(substeps);
         for (BoneId b = 0; b < bone_count; ++b) {
-            body_.set_bone_target(
+            body_.set_bone_pose(
                 b,
                 previous_bone_targets_[b]
-                    + (desired_targets[b] - previous_bone_targets_[b]) * t);
+                    + (desired_targets[b] - previous_bone_targets_[b]) * t,
+                slerp(previous_bone_rotations_[b], desired_rotations[b], t));
         }
 
         if (has_external_accel_) {
@@ -505,6 +510,7 @@ void CharacterRuntime::step(double dt) {
     }
 
     previous_bone_targets_ = std::move(desired_targets);
+    previous_bone_rotations_ = std::move(desired_rotations);
     ++step_index_;
     refresh_island_kinematics();
 }

@@ -293,6 +293,44 @@ void test_linear_damping_is_opt_in() {
     check(v_damped < 0.5 && v_damped > 0.2, "linear damping decays velocity at ~exp(-c t)");
 }
 
+void test_bone_rotation_rotates_attachments() {
+    sarx::Body body;
+    const auto root = body.add_bone(sarx::kNoParent, {0.0, 0.0, 0.0});
+    const auto p = body.add_particle({1.0, 0.0, 0.0}, 1.0);
+    const auto a = body.add_attachment(p, root, {1.0, 0.0, 0.0}, 1e-9);
+    check(sarx::nearly_equal(body.attachment_target(body.attachments()[a]), Vec3{1, 0, 0}),
+          "identity rotation keeps the rest offset");
+
+    body.set_bone_pose(root, {0.0, 0.0, 0.0}, sarx::axis_angle({0, 1, 0}, 1.5707963267948966));
+    check(sarx::nearly_equal(body.attachment_target(body.attachments()[a]), Vec3{0, 0, -1}, 1e-9),
+          "bone rotation rotates the attachment offset about the bone");
+
+    sarx::StepConfig cfg;
+    cfg.gravity = {};
+    cfg.substeps = 4;
+    cfg.solver_iterations = 12;
+    for (int i = 0; i < 20; ++i) body.step(kDt, cfg);
+    check(sarx::length(body.particles()[p].position - Vec3{0, 0, -1}) < 1e-3,
+          "particle follows the rotated attachment target");
+
+    // Runtime interpolates rotations across substeps (no angular snap).
+    auto h = sarx::build_humanoid_runtime();
+    h.runtime.config().ground.enabled = false;
+    h.runtime.config().step.gravity = {};
+    const auto head = h.bones.head;
+    const Vec3 pivot = h.rest_bone_positions[head];
+    for (int i = 0; i < 30; ++i) {
+        h.runtime.body().set_bone_pose(head, pivot, sarx::axis_angle({1, 0, 0}, 0.02 * (i + 1)));
+        h.runtime.step(kDt);
+    }
+    const auto& head_particles = h.runtime.region_particles("head");
+    double max_speed = 0.0;
+    for (const auto id : head_particles) {
+        max_speed = std::max(max_speed, sarx::length(h.runtime.body().particles()[id].velocity));
+    }
+    check(max_speed > 0.05 && max_speed < 2.0, "rotating head carries a smooth angular velocity");
+}
+
 sarx::HumanoidRuntime run_scripted(bool replay_from_log,
                                    const std::vector<sarx::RuntimeLogEntry>& log) {
     auto h = sarx::build_humanoid_runtime({}, {0.0, 0.0, 1.0});
@@ -373,6 +411,7 @@ int main() {
     test_viability_uses_island_anatomy();
     test_deterministic_replay();
     test_linear_damping_is_opt_in();
+    test_bone_rotation_rotates_attachments();
 
     if (failures > 0) {
         std::cerr << failures << " runtime test failure(s)\n";

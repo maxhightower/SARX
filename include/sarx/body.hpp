@@ -26,6 +26,10 @@ struct Particle {
 struct Bone {
     BoneId parent{kNoParent};
     Vec3 animated_position{};
+    // Orientation of the bone relative to its rest pose. Attachment offsets
+    // (captured at rest) are rotated by it. Identity keeps the original
+    // translation-only behaviour.
+    Rotation animated_rotation{};
     bool joint_to_parent_active{true};
     double joint_damage{0.0};
     double joint_break_damage{1.0};
@@ -138,6 +142,13 @@ public:
         MaterialId material = kDefaultMaterial);
 
     void set_bone_target(BoneId bone, const Vec3& animated_position);
+    void set_bone_pose(BoneId bone, const Vec3& animated_position, const Rotation& animated_rotation);
+
+    // World-space target of an attachment: bone position + rotated offset.
+    [[nodiscard]] Vec3 attachment_target(const AttachmentConstraint& attachment) const {
+        const Bone& b = bones_[attachment.bone];
+        return b.animated_position + rotate(b.animated_rotation, attachment.local_offset);
+    }
 
     void damage_structural(ConstraintId constraint, double amount);
     void damage_tetrahedral(ConstraintId constraint, double amount);

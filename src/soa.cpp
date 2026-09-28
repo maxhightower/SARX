@@ -196,9 +196,11 @@ BodySoA snapshot_body_soa(const Body& body) {
     for (const auto& a : attachments) {
         out.attachments.particle.push_back(a.particle);
         out.attachments.bone.push_back(a.bone);
-        out.attachments.offset_x.push_back(a.local_offset.x);
-        out.attachments.offset_y.push_back(a.local_offset.y);
-        out.attachments.offset_z.push_back(a.local_offset.z);
+        // The SoA snapshot bakes the bone rotation into a world-space offset.
+        const Vec3 offset = rotate(body.bones()[a.bone].animated_rotation, a.local_offset);
+        out.attachments.offset_x.push_back(offset.x);
+        out.attachments.offset_y.push_back(offset.y);
+        out.attachments.offset_z.push_back(offset.z);
         out.attachments.compliance.push_back(a.compliance);
         out.attachments.damage.push_back(a.damage);
         out.attachments.break_damage.push_back(a.break_damage);

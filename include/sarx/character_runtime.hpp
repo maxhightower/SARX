@@ -225,6 +225,7 @@ private:
     std::vector<RuntimeLogEntry> damage_log_;
 
     std::vector<Vec3> previous_bone_targets_;
+    std::vector<Rotation> previous_bone_rotations_;
     std::vector<Vec3> external_accel_;
     bool has_external_accel_{false};
     bool rig_authority_{true};

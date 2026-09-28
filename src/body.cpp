@@ -187,6 +187,14 @@ void Body::set_bone_target(BoneId bone, const Vec3& animated_position) {
     bones_[bone].animated_position = animated_position;
 }
 
+void Body::set_bone_pose(BoneId bone, const Vec3& animated_position, const Rotation& animated_rotation) {
+    if (bone >= bones_.size()) {
+        throw std::out_of_range("invalid bone");
+    }
+    bones_[bone].animated_position = animated_position;
+    bones_[bone].animated_rotation = normalized(animated_rotation);
+}
+
 void Body::damage_structural(ConstraintId constraint, double amount) {
     if (constraint >= structural_.size()) {
         throw std::out_of_range("invalid structural constraint");
@@ -591,8 +599,7 @@ void Body::solve_attachments(
         auto& p = particles_[a.particle];
         if (p.inverse_mass == 0.0) continue;
 
-        const Vec3 target =
-            bones_[a.bone].animated_position + a.local_offset;
+        const Vec3 target = attachment_target(a);
         const Vec3 C = p.position - target;
         const double alpha = a.compliance / (h * h);
         const double denom = p.inverse_mass + alpha;

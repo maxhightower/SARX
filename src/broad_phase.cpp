@@ -195,7 +195,7 @@ void DamageBroadPhase::rebuild(const Body& body, double cell_size) {
         const auto& a = body.attachments()[id];
         if (!a.active) continue;
         const Vec3 p0 = body.particles()[a.particle].position;
-        const Vec3 p1 = body.bones()[a.bone].animated_position + a.local_offset;
+        const Vec3 p1 = body.attachment_target(a);
         impl_->insert_aabb(min_vec(p0, p1), max_vec(p0, p1), Entry{IndexedKind::Attachment, id});
         ++impl_->indexed_primitives;
     }

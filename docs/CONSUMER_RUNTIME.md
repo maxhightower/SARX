@@ -64,3 +64,17 @@ that frame's deformation gradient, and carves them with the same
 `DamageCommand` SARX applies to the lattice. It also flags "exposed" voxels:
 those facing a carved hole or a torn island boundary. The skin is appearance
 only and never feeds back into physics. Tests: `tests/test_anatomical_skin.cpp`.
+
+## Rotational bone poses and clip sampling
+
+`Bone::animated_rotation` (a unit quaternion, `sarx::Rotation`) rotates
+attachment offsets about the bone: attachment target = bone position +
+R · rest offset (`Body::attachment_target`). Identity rotation reproduces the
+original translation-only behaviour, so existing fixtures and tests are
+unchanged. The solver, damage geometry, broad phase, adaptive domains and
+SoA snapshot all use the rotated target. `CharacterRuntime` slerps rotations
+across substeps. `Body::set_bone_pose(bone, position, rotation)` sets both.
+
+`GltfCharacter::sample_node_positions(animation, t, names)` returns
+world-space joint positions of an animation clip (case-insensitive names),
+so consumers can retarget authored motion onto SARX rigs.

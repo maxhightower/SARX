@@ -113,6 +113,8 @@ if (SARX_BUILD_TESTS)
         tests/test_anatomical_skin.cpp
     )
     target_link_libraries(sarx_anatomical_skin_tests PRIVATE sarx)
+    target_compile_definitions(sarx_anatomical_skin_tests PRIVATE
+        SARX_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
     target_compile_features(sarx_anatomical_skin_tests PRIVATE cxx_std_20)
 
     add_test(NAME sarx_anatomical_skin_tests COMMAND sarx_anatomical_skin_tests)

@@ -1,5 +1,8 @@
 #include "sarx/anatomical_humanoid.hpp"
+#include "sarx/gltf_character.hpp"
 #include "sarx/voxel_skin.hpp"
+
+#include <filesystem>
 
 #include <algorithm>
 #include <cmath>
@@ -169,6 +172,25 @@ void test_skin_follows_body_and_carves() {
     check(exposed_brain > 0, "headshot exposes brain tissue");
 }
 
+void test_sample_node_positions() {
+    const std::string dir = SARX_ASSET_DIR;
+    const std::string character = dir + "/quaternius/character.glb";
+    const std::string animations = dir + "/quaternius/animations.glb";
+    if (!std::filesystem::exists(character) || !std::filesystem::exists(animations)) {
+        std::cout << "skipping node sampling test (assets not present)\n";
+        return;
+    }
+    GltfCharacter c;
+    c.load(character, animations);
+    const auto walk = c.find_animation("Walk_Loop");
+    const double duration = c.animation_duration(walk);
+    const auto a = c.sample_node_positions(walk, 0.0, {"Head", "foot_l", "missing_node"});
+    const auto b = c.sample_node_positions(walk, duration * 0.5, {"Head", "foot_l"});
+    check(std::isfinite(a[0].y) && a[0].y > 1.3 && a[0].y < 1.8, "head joint sampled at head height (case-insensitive)");
+    check(std::isnan(a[2].x), "unknown node yields NaN");
+    check(std::abs(a[1].z - b[1].z) > 0.2, "walking foot moves over half a cycle");
+}
+
 } // namespace
 
 int main() {
@@ -176,6 +198,7 @@ int main() {
     test_anatomical_landmark_cuts();
     test_detail_voxels();
     test_skin_follows_body_and_carves();
+    test_sample_node_positions();
     if (failures > 0) {
         std::cerr << failures << " anatomical/skin test failure(s)\n";
         return 1;
