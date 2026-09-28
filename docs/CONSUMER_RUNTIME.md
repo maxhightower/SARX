@@ -43,3 +43,24 @@ cmake -S . -B build -DSARX_BUILD_TOOLS=OFF
 cmake --build build
 ctest --test-dir build --output-on-failure
 ~~~
+
+## Anatomical humanoid and embedded voxel skin
+
+`sarx/anatomical_humanoid.hpp` adds a second, human-proportioned humanoid body
+(~1.8 m, ~83 kg, arms-forward rest pose). It has the same 17-bone topology and
+`HumanoidBones` as the reference fixture and is simulated on a 5 cm lattice
+(676 particles). Each particle attaches to the bone that ends its nearest
+skeletal segment, so any cut on a segment detaches everything distal to it.
+`anatomical_landmarks()` gives rest-space cut and brain placements.
+
+`build_anatomical_detail_voxels(0.02)` generates a 2 cm appearance voxel set
+(~7.9k voxels). It adds detail the lattice does not simulate (face, ears,
+fingers, feet) and tags each voxel with a tissue type: soft tissue, bone
+(skull, spine, ribs, limb bones) or neural (brain).
+
+`sarx/voxel_skin.hpp` `EmbeddedVoxelSkin` binds each detail voxel to an affine
+frame of four lattice particles in the same island. It deforms the voxels with
+that frame's deformation gradient, and carves them with the same
+`DamageCommand` SARX applies to the lattice. It also flags "exposed" voxels:
+those facing a carved hole or a torn island boundary. The skin is appearance
+only and never feeds back into physics. Tests: `tests/test_anatomical_skin.cpp`.

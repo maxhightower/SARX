@@ -21,6 +21,8 @@ add_library(sarx
     src/authored_root_motion.cpp
     src/detached_articulation.cpp
     src/character_runtime.cpp
+    src/anatomical_humanoid.cpp
+    src/voxel_skin.cpp
 )
 
 target_include_directories(sarx
@@ -106,6 +108,14 @@ if (SARX_BUILD_TESTS)
     target_compile_features(sarx_runtime_tests PRIVATE cxx_std_20)
 
     add_test(NAME sarx_runtime_tests COMMAND sarx_runtime_tests)
+
+    add_executable(sarx_anatomical_skin_tests
+        tests/test_anatomical_skin.cpp
+    )
+    target_link_libraries(sarx_anatomical_skin_tests PRIVATE sarx)
+    target_compile_features(sarx_anatomical_skin_tests PRIVATE cxx_std_20)
+
+    add_test(NAME sarx_anatomical_skin_tests COMMAND sarx_anatomical_skin_tests)
 
     if (SARX_BUILD_TOOLS)
         add_test(
