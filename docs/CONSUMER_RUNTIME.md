@@ -21,6 +21,7 @@ game semantics (no life/death, brains, enemies, waves, or scoring).
 | External motor influence | `add_particle_acceleration`, `add_island_acceleration` (cleared after each step). |
 | Active ↔ passive | `set_rig_authority(bool)` excludes attachment constraints from the solve without damaging them; particle state is untouched. |
 | Ground contact | Optional half-space with Coulomb-bounded friction, applied between substeps. |
+| Damping | Optional `linear_damping` (1/s, default 0 = unchanged Body behaviour). Useful because the reference solver has no rolling resistance: a capsule-shaped passive torso otherwise rocks indefinitely. |
 | Deterministic replay | `damage_log()` records each command with the step index at which it was applied. |
 
 ## Momentum continuity

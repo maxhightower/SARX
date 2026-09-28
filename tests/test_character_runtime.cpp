@@ -274,6 +274,25 @@ void test_viability_uses_island_anatomy() {
           "arm island satisfies an arm-only capability");
 }
 
+void test_linear_damping_is_opt_in() {
+    sarx::RuntimeConfig config;
+    config.ground.enabled = false;
+    config.step.gravity = {};
+    auto undamped = sarx::build_humanoid_runtime({}, {}, config);
+    config.linear_damping = 2.0;
+    auto damped = sarx::build_humanoid_runtime({}, {}, config);
+
+    for (auto* h : {&undamped, &damped}) {
+        h->runtime.set_rig_authority(false);
+        for (auto& p : h->runtime.body().particles()) p.velocity = {0.0, 0.0, 1.0};
+        for (int i = 0; i < 30; ++i) h->runtime.step(kDt);
+    }
+    const double v_free = undamped.runtime.islands().front().linear_velocity.z;
+    const double v_damped = damped.runtime.islands().front().linear_velocity.z;
+    check(std::abs(v_free - 1.0) < 1e-9, "default runtime keeps Body's undamped motion");
+    check(v_damped < 0.5 && v_damped > 0.2, "linear damping decays velocity at ~exp(-c t)");
+}
+
 sarx::HumanoidRuntime run_scripted(bool replay_from_log,
                                    const std::vector<sarx::RuntimeLogEntry>& log) {
     auto h = sarx::build_humanoid_runtime({}, {0.0, 0.0, 1.0});
@@ -353,6 +372,7 @@ int main() {
     test_region_integrity_tracks_local_damage();
     test_viability_uses_island_anatomy();
     test_deterministic_replay();
+    test_linear_damping_is_opt_in();
 
     if (failures > 0) {
         std::cerr << failures << " runtime test failure(s)\n";

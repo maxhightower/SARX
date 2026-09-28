@@ -44,6 +44,9 @@ struct GroundContact {
 struct RuntimeConfig {
     StepConfig step{};
     GroundContact ground{};
+    // Optional linear velocity damping in 1/s applied every substep
+    // (v *= 1 - linear_damping * h). 0 keeps the undamped Body behaviour.
+    double linear_damping{0.0};
 };
 
 struct IslandState {

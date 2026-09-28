@@ -30,6 +30,9 @@ CharacterRuntime::CharacterRuntime(Body body, RuntimeConfig config)
     if (config_.step.substeps <= 0 || config_.step.solver_iterations <= 0) {
         throw std::invalid_argument("runtime step counts must be positive");
     }
+    if (config_.linear_damping < 0.0) {
+        throw std::invalid_argument("linear damping must be non-negative");
+    }
 
     home_bone_.assign(body_.particles().size(), kNoParent);
     for (const auto& attachment : body_.attachments()) {
@@ -487,6 +490,11 @@ void CharacterRuntime::step(double dt) {
         }
 
         (void)body_.step_restricted(h, domain, single);
+
+        if (config_.linear_damping > 0.0) {
+            const double keep = std::max(0.0, 1.0 - config_.linear_damping * h);
+            for (auto& p : body_.particles()) p.velocity *= keep;
+        }
 
         if (config_.ground.enabled) apply_ground_contact();
     }
