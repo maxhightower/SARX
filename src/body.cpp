@@ -497,10 +497,20 @@ StepStats Body::step_restricted(
             attachments_[id].lambda = {};
         }
 
+        std::vector<Vec3> attachment_targets(domain.attachments.size());
+        std::vector<std::uint8_t> attachment_connected(domain.attachments.size(), 0u);
+        for (std::size_t k = 0; k < domain.attachments.size(); ++k) {
+            const auto& a = attachments_[domain.attachments[k]];
+            if (!a.active || !bone_root_connected(a.bone)) continue;
+            attachment_connected[k] = 1u;
+            attachment_targets[k] = attachment_target(a);
+        }
+
         for (int iteration = 0; iteration < config.solver_iterations; ++iteration) {
             solve_structural(h, domain.structural, active_particles);
             solve_tetrahedral(h, domain.tetrahedral, active_particles);
-            solve_attachments(h, domain.attachments, active_particles);
+            solve_attachments(h, domain.attachments, active_particles,
+                              attachment_targets, attachment_connected);
 
             stats.solver_constraint_visits +=
                 domain.structural.size()
@@ -614,21 +624,19 @@ void Body::solve_tetrahedral(
 void Body::solve_attachments(
     double h,
     const std::vector<ConstraintId>& ids,
-    const std::vector<std::uint8_t>& active_particles) {
+    const std::vector<std::uint8_t>& active_particles,
+    const std::vector<Vec3>& targets,
+    const std::vector<std::uint8_t>& connected) {
 
-    for (const ConstraintId id : ids) {
-        auto& a = attachments_[id];
-        if (!a.active
-            || !active_particles[a.particle]
-            || !bone_root_connected(a.bone)) {
-            continue;
-        }
+    for (std::size_t k = 0; k < ids.size(); ++k) {
+        if (!connected[k]) continue;
+        auto& a = attachments_[ids[k]];
+        if (!active_particles[a.particle]) continue;
 
         auto& p = particles_[a.particle];
         if (p.inverse_mass == 0.0) continue;
 
-        const Vec3 target = attachment_target(a);
-        const Vec3 C = p.position - target;
+        const Vec3 C = p.position - targets[k];
         const double alpha = a.compliance / (h * h);
         const double denom = p.inverse_mass + alpha;
         if (denom <= 1e-12) continue;

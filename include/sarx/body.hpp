@@ -193,10 +193,15 @@ private:
         double h,
         const std::vector<ConstraintId>& ids,
         const std::vector<std::uint8_t>& active_particles);
+    // Targets are resolved once per substep (bone poses and rig
+    // connectivity do not change across solver iterations); entries with a
+    // disconnected bone are skipped.
     void solve_attachments(
         double h,
         const std::vector<ConstraintId>& ids,
-        const std::vector<std::uint8_t>& active_particles);
+        const std::vector<std::uint8_t>& active_particles,
+        const std::vector<Vec3>& targets,
+        const std::vector<std::uint8_t>& connected);
 
     std::vector<Particle> particles_;
     std::vector<Bone> bones_;
