@@ -331,6 +331,47 @@ void test_bone_rotation_rotates_attachments() {
     check(max_speed > 0.05 && max_speed < 2.0, "rotating head carries a smooth angular velocity");
 }
 
+void test_relax_rest_shape_removes_stored_strain() {
+    auto h = sarx::build_humanoid_runtime();
+    auto& r = h.runtime;
+    r.config().step.gravity = {};
+    r.config().ground.enabled = false;
+    // Bend the head over hard so the neck lattice stores strain.
+    r.body().set_bone_pose(h.bones.head, h.rest_bone_positions[h.bones.head] + Vec3{0.0, -0.1, 0.2},
+                           sarx::axis_angle({1, 0, 0}, 0.8));
+    for (int i = 0; i < 30; ++i) r.step(kDt);
+
+    auto max_strain = [&] {
+        double m = 0.0;
+        for (const auto& c : r.body().structural_constraints()) {
+            if (!c.active) continue;
+            const auto& p = r.body().particles();
+            m = std::max(m, std::abs(sarx::length(p[c.b].position - p[c.a].position) - c.rest_length));
+        }
+        return m;
+    };
+    check(max_strain() > 0.01, "posed body stores lattice strain");
+    const auto before = r.body().particles();
+    r.relax_rest_shape();
+    check(max_strain() < 1e-9, "relaxation adopts the current shape as rest");
+    bool untouched = true;
+    for (std::size_t i = 0; i < before.size(); ++i) {
+        untouched = untouched && sarx::nearly_equal(before[i].position, r.body().particles()[i].position, 0.0)
+            && sarx::nearly_equal(before[i].velocity, r.body().particles()[i].velocity, 0.0);
+    }
+    check(untouched, "relaxation does not move particles");
+
+    // Released without relaxation the head would snap; relaxed it does not.
+    r.set_rig_authority(false);
+    const auto held = r.body().particles();
+    r.step(kDt);
+    double jump = 0.0;
+    for (std::size_t i = 0; i < held.size(); ++i) {
+        jump = std::max(jump, sarx::length(r.body().particles()[i].position - held[i].position));
+    }
+    check(jump < 0.01, "relaxed body shows no elastic recoil on release");
+}
+
 sarx::HumanoidRuntime run_scripted(bool replay_from_log,
                                    const std::vector<sarx::RuntimeLogEntry>& log) {
     auto h = sarx::build_humanoid_runtime({}, {0.0, 0.0, 1.0});
@@ -412,6 +453,7 @@ int main() {
     test_deterministic_replay();
     test_linear_damping_is_opt_in();
     test_bone_rotation_rotates_attachments();
+    test_relax_rest_shape_removes_stored_strain();
 
     if (failures > 0) {
         std::cerr << failures << " runtime test failure(s)\n";

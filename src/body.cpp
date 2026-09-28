@@ -287,6 +287,34 @@ void Body::break_bone_joint(BoneId bone) {
     damage_bone_joint(bone, std::max(0.0, b.joint_break_damage - b.joint_damage));
 }
 
+void Body::relax_rest_state(const std::vector<std::uint8_t>& selected) {
+    const bool all = selected.empty();
+    if (!all && selected.size() != particles_.size()) {
+        throw std::invalid_argument("relax selection must cover every particle");
+    }
+    auto chosen = [&](ParticleId p) { return all || selected[p] != 0u; };
+
+    for (auto& c : structural_) {
+        if (!c.active || !chosen(c.a) || !chosen(c.b)) continue;
+        const Vec3 delta = particles_[c.b].position - particles_[c.a].position;
+        const double len = length(delta);
+        if (len <= 1e-9) continue;
+        c.rest_length = len;
+        c.rest_direction = delta / len;
+        c.lambda = 0.0;
+    }
+    for (auto& t : tetrahedral_) {
+        if (!t.active || !chosen(t.a) || !chosen(t.b) || !chosen(t.c) || !chosen(t.d)) continue;
+        const Vec3& p0 = particles_[t.a].position;
+        const double volume = dot(particles_[t.b].position - p0,
+                                  cross(particles_[t.c].position - p0, particles_[t.d].position - p0)) / 6.0;
+        // Keep orientation: never relax into an inverted element.
+        if (std::abs(volume) <= 1e-12 || (volume > 0.0) != (t.rest_volume > 0.0)) continue;
+        t.rest_volume = volume;
+        t.lambda = 0.0;
+    }
+}
+
 bool Body::bone_root_connected(BoneId bone) const {
     if (bone >= bones_.size()) {
         return false;

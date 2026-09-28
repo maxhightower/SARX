@@ -178,6 +178,12 @@ public:
     void set_rig_authority(bool enabled) { rig_authority_ = enabled; }
     [[nodiscard]] bool rig_authority() const { return rig_authority_; }
 
+    // Plastic relaxation of the listed islands (empty = whole body): their
+    // current shape becomes the elastic rest shape, so strain stored by an
+    // animated pose is not released as recoil when motor control ends.
+    // Particle positions/velocities are unchanged.
+    void relax_rest_shape(const std::vector<IslandId>& islands = {});
+
     // Accumulated for the next step() only, then cleared.
     void add_particle_acceleration(ParticleId particle, const Vec3& accel);
     void add_island_acceleration(IslandId island, const Vec3& accel);

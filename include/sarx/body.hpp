@@ -160,6 +160,12 @@ public:
     void break_attachment(ConstraintId constraint);
     void break_bone_joint(BoneId bone);
 
+    // Plastic relaxation: adopt the current configuration as the rest shape
+    // of the selected particles' constraints (structural lengths/directions
+    // and tetrahedral volumes whose particles are all selected). Particle
+    // positions and velocities are not touched. Empty selection = all.
+    void relax_rest_state(const std::vector<std::uint8_t>& selected = {});
+
     [[nodiscard]] bool bone_root_connected(BoneId bone) const;
     [[nodiscard]] std::vector<Island> islands() const;
     [[nodiscard]] Vec3 total_linear_momentum() const;

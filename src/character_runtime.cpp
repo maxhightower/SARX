@@ -419,6 +419,21 @@ void CharacterRuntime::add_island_acceleration(
     has_external_accel_ = true;
 }
 
+void CharacterRuntime::relax_rest_shape(const std::vector<IslandId>& islands) {
+    if (islands.empty()) {
+        body_.relax_rest_state();
+    } else {
+        std::vector<std::uint8_t> selected(body_.particles().size(), 0u);
+        for (ParticleId p = 0; p < selected.size(); ++p) {
+            if (std::find(islands.begin(), islands.end(), particle_island_[p]) != islands.end()) {
+                selected[p] = 1u;
+            }
+        }
+        body_.relax_rest_state(selected);
+    }
+    // Region integrity is topological (active links), so it is unaffected.
+}
+
 bool CharacterRuntime::has_pending_external_acceleration() const {
     return has_external_accel_;
 }

@@ -78,3 +78,14 @@ across substeps. `Body::set_bone_pose(bone, position, rotation)` sets both.
 `GltfCharacter::sample_node_positions(animation, t, names)` returns
 world-space joint positions of an animation clip (case-insensitive names),
 so consumers can retarget authored motion onto SARX rigs.
+
+## Plastic rest-shape relaxation
+
+An animated lattice stores bending strain at joints. If the rest shape stays
+the T/A pose, releasing motor control makes that strain spring back
+(elastic recoil). `CharacterRuntime::relax_rest_shape(islands)` /
+`Body::relax_rest_state(selection)` adopt the current configuration as the
+rest shape: structural lengths and directions, and tetrahedral volumes
+(never into inverted elements). Particle state is not touched. Consumers
+call it when motor control ends (death, severance), so remains keep their
+last pose and then deform only under gravity and contact.
