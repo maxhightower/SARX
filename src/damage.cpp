@@ -639,7 +639,7 @@ DamageReport DamageSystem::apply_capsule(
         if (!a.active) continue;
 
         const Vec3 p0 = body.particles()[a.particle].position;
-        const Vec3 p1 = body.bones()[a.bone].animated_position + a.local_offset;
+        const Vec3 p1 = body.attachment_target(a);
         const auto hit = segment_segment_distance(damage.a, damage.b, p0, p1);
         const auto material = materials_.get(a.material);
         const double amount = damage_from_distance(
@@ -840,9 +840,7 @@ DamageReport DamageSystem::apply_plane_cut(
 
         const Vec3 p0 =
             body.particles()[attachment.particle].position;
-        const Vec3 p1 =
-            body.bones()[attachment.bone].animated_position
-            + attachment.local_offset;
+        const Vec3 p1 = body.attachment_target(attachment);
 
         const auto hit = segment_plane_disk_hit(
             p0,
@@ -1012,7 +1010,7 @@ DamageReport DamageSystem::apply_sphere(
         if (!a.active) continue;
 
         const Vec3 p0 = body.particles()[a.particle].position;
-        const Vec3 p1 = body.bones()[a.bone].animated_position + a.local_offset;
+        const Vec3 p1 = body.attachment_target(a);
         const auto hit = point_segment_distance(damage.center, p0, p1);
         const auto material = materials_.get(a.material);
         const double amount = damage_from_distance(

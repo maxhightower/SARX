@@ -187,6 +187,14 @@ void Body::set_bone_target(BoneId bone, const Vec3& animated_position) {
     bones_[bone].animated_position = animated_position;
 }
 
+void Body::set_bone_pose(BoneId bone, const Vec3& animated_position, const Rotation& animated_rotation) {
+    if (bone >= bones_.size()) {
+        throw std::out_of_range("invalid bone");
+    }
+    bones_[bone].animated_position = animated_position;
+    bones_[bone].animated_rotation = normalized(animated_rotation);
+}
+
 void Body::damage_structural(ConstraintId constraint, double amount) {
     if (constraint >= structural_.size()) {
         throw std::out_of_range("invalid structural constraint");
@@ -277,6 +285,34 @@ void Body::break_bone_joint(BoneId bone) {
         return;
     }
     damage_bone_joint(bone, std::max(0.0, b.joint_break_damage - b.joint_damage));
+}
+
+void Body::relax_rest_state(const std::vector<std::uint8_t>& selected) {
+    const bool all = selected.empty();
+    if (!all && selected.size() != particles_.size()) {
+        throw std::invalid_argument("relax selection must cover every particle");
+    }
+    auto chosen = [&](ParticleId p) { return all || selected[p] != 0u; };
+
+    for (auto& c : structural_) {
+        if (!c.active || !chosen(c.a) || !chosen(c.b)) continue;
+        const Vec3 delta = particles_[c.b].position - particles_[c.a].position;
+        const double len = length(delta);
+        if (len <= 1e-9) continue;
+        c.rest_length = len;
+        c.rest_direction = delta / len;
+        c.lambda = 0.0;
+    }
+    for (auto& t : tetrahedral_) {
+        if (!t.active || !chosen(t.a) || !chosen(t.b) || !chosen(t.c) || !chosen(t.d)) continue;
+        const Vec3& p0 = particles_[t.a].position;
+        const double volume = dot(particles_[t.b].position - p0,
+                                  cross(particles_[t.c].position - p0, particles_[t.d].position - p0)) / 6.0;
+        // Keep orientation: never relax into an inverted element.
+        if (std::abs(volume) <= 1e-12 || (volume > 0.0) != (t.rest_volume > 0.0)) continue;
+        t.rest_volume = volume;
+        t.lambda = 0.0;
+    }
 }
 
 bool Body::bone_root_connected(BoneId bone) const {
@@ -461,10 +497,20 @@ StepStats Body::step_restricted(
             attachments_[id].lambda = {};
         }
 
+        std::vector<Vec3> attachment_targets(domain.attachments.size());
+        std::vector<std::uint8_t> attachment_connected(domain.attachments.size(), 0u);
+        for (std::size_t k = 0; k < domain.attachments.size(); ++k) {
+            const auto& a = attachments_[domain.attachments[k]];
+            if (!a.active || !bone_root_connected(a.bone)) continue;
+            attachment_connected[k] = 1u;
+            attachment_targets[k] = attachment_target(a);
+        }
+
         for (int iteration = 0; iteration < config.solver_iterations; ++iteration) {
             solve_structural(h, domain.structural, active_particles);
             solve_tetrahedral(h, domain.tetrahedral, active_particles);
-            solve_attachments(h, domain.attachments, active_particles);
+            solve_attachments(h, domain.attachments, active_particles,
+                              attachment_targets, attachment_connected);
 
             stats.solver_constraint_visits +=
                 domain.structural.size()
@@ -578,22 +624,19 @@ void Body::solve_tetrahedral(
 void Body::solve_attachments(
     double h,
     const std::vector<ConstraintId>& ids,
-    const std::vector<std::uint8_t>& active_particles) {
+    const std::vector<std::uint8_t>& active_particles,
+    const std::vector<Vec3>& targets,
+    const std::vector<std::uint8_t>& connected) {
 
-    for (const ConstraintId id : ids) {
-        auto& a = attachments_[id];
-        if (!a.active
-            || !active_particles[a.particle]
-            || !bone_root_connected(a.bone)) {
-            continue;
-        }
+    for (std::size_t k = 0; k < ids.size(); ++k) {
+        if (!connected[k]) continue;
+        auto& a = attachments_[ids[k]];
+        if (!active_particles[a.particle]) continue;
 
         auto& p = particles_[a.particle];
         if (p.inverse_mass == 0.0) continue;
 
-        const Vec3 target =
-            bones_[a.bone].animated_position + a.local_offset;
-        const Vec3 C = p.position - target;
+        const Vec3 C = p.position - targets[k];
         const double alpha = a.compliance / (h * h);
         const double denom = p.inverse_mass + alpha;
         if (denom <= 1e-12) continue;

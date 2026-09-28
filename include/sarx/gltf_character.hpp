@@ -74,6 +74,14 @@ public:
     [[nodiscard]] double animation_duration(
         std::size_t animation) const;
 
+    // World-space positions of named nodes (e.g. skeleton joints) for an
+    // animation at `time_seconds`. Unknown names yield NaN positions.
+    [[nodiscard]] std::vector<Vec3> sample_node_positions(
+        std::size_t animation,
+        double time_seconds,
+        const std::vector<std::string>& node_names,
+        bool loop = true) const;
+
     [[nodiscard]] std::vector<std::string>
     animation_target_nodes(
         std::size_t animation) const;

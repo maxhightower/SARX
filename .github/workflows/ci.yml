@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - "research/**"
+      - "integration/**"
+      - "claude/townward-**"
   pull_request:
 
 jobs:
