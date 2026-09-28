@@ -214,6 +214,10 @@ void EmbeddedVoxelSkin::update(const CharacterRuntime& runtime) {
                                   k == 0 ? r[2].x : k == 1 ? r[2].y : r[2].z};
             v.axes[k] = (a * ck[0] + b * ck[1] + c * ck[2]) * voxel_size_;
         }
+        // Thin lattice regions can invert (reflect) under contact. A cube is
+        // symmetric, so keep the drawn basis right-handed; the centre, which
+        // carries the actual shape, is unaffected.
+        if (dot(v.axes[0], cross(v.axes[1], v.axes[2])) < 0.0) v.axes[2] = -v.axes[2];
     }
 }
 

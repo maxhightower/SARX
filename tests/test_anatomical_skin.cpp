@@ -126,6 +126,12 @@ void test_skin_follows_body_and_carves() {
         drift = std::max(drift, length(v.center - (v.rest + Vec3{0.0, 0.0, 0.40})));
     }
     check(drift < 0.06, "skin follows the driven body");
+    bool right_handed = true;
+    for (const auto index : skin.surface()) {
+        const auto& a = skin.voxels()[index].axes;
+        right_handed = right_handed && dot(a[0], cross(a[1], a[2])) > 0.0;
+    }
+    check(right_handed, "drawn voxel bases are right-handed");
 
     const auto& lm = anatomical_landmarks();
     const auto cut = plane(lm.right_shoulder_cut_center + offset + Vec3{0, 0, 0.40},

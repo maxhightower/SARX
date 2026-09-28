@@ -47,7 +47,7 @@ struct SkinVoxel {
 
     // Updated by EmbeddedVoxelSkin::update() for surface voxels.
     Vec3 center{};
-    std::array<Vec3, 3> axes{};  // deformed voxel edge vectors
+    std::array<Vec3, 3> axes{};  // deformed voxel edge vectors (right-handed)
 };
 
 class EmbeddedVoxelSkin {
