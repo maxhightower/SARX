@@ -110,6 +110,9 @@ void test_skin_follows_body_and_carves() {
         err = std::max(err, length(skin.world_position(r, i) - skin.voxels()[i].rest));
     }
     check(err < 1e-9, "skin reconstructs the rest pose exactly");
+    const Vec3 probe = skin.voxels()[100].rest + Vec3{0.007, -0.004, 0.009};
+    check(length(skin.deform_rest_point(r, 100, probe) - probe) < 1e-9,
+          "deform_rest_point is identity at rest");
     check(skin.surface().size() > 1000 && skin.surface().size() < skin.voxels().size(),
           "only boundary voxels are surface voxels");
 
@@ -126,6 +129,11 @@ void test_skin_follows_body_and_carves() {
         drift = std::max(drift, length(v.center - (v.rest + Vec3{0.0, 0.0, 0.40})));
     }
     check(drift < 0.06, "skin follows the driven body");
+    {
+        const auto& v = skin.voxels()[skin.surface().front()];
+        const Vec3 moved = skin.deform_rest_point(r, skin.surface().front(), v.rest);
+        check(length(moved - v.center) < 1e-9, "deform_rest_point matches the voxel centre");
+    }
     bool right_handed = true;
     for (const auto index : skin.surface()) {
         const auto& a = skin.voxels()[index].axes;

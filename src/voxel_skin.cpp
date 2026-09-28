@@ -190,6 +190,25 @@ Vec3 EmbeddedVoxelSkin::world_position(const CharacterRuntime& runtime, std::siz
     return p0 + a * v.frame_coords.x + b * v.frame_coords.y + c * v.frame_coords.z;
 }
 
+Vec3 EmbeddedVoxelSkin::deform_rest_point(
+    const CharacterRuntime& runtime,
+    std::size_t index,
+    const Vec3& rest_point) const {
+
+    const auto& particles = runtime.body().particles();
+    const ParticleId anchor = voxels_[index].anchor;
+    const Vec3 p0 = particles[anchor].position;
+    const Vec3 offset = rest_point - rest_particles_[anchor];
+    const Frame& frame = frames_[anchor];
+    if (!frame.valid) return p0 + offset;
+    const Vec3 u{dot(frame.inverse_rows[0], offset), dot(frame.inverse_rows[1], offset),
+                 dot(frame.inverse_rows[2], offset)};
+    const Vec3 a = particles[frame.others[0]].position - p0;
+    const Vec3 b = particles[frame.others[1]].position - p0;
+    const Vec3 c = particles[frame.others[2]].position - p0;
+    return p0 + a * u.x + b * u.y + c * u.z;
+}
+
 void EmbeddedVoxelSkin::update(const CharacterRuntime& runtime) {
     const auto& particles = runtime.body().particles();
     for (const std::uint32_t index : surface_) {

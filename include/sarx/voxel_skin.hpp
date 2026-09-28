@@ -81,6 +81,14 @@ public:
     // World position of any alive voxel (surface or interior).
     [[nodiscard]] Vec3 world_position(const CharacterRuntime& runtime, std::size_t voxel) const;
 
+    // Maps an arbitrary rest-space (world at build time) point through the
+    // deformation frame that drives `voxel`. Lets consumers bind their own
+    // render geometry (e.g. a smoothed surface mesh) to the skin.
+    [[nodiscard]] Vec3 deform_rest_point(
+        const CharacterRuntime& runtime,
+        std::size_t voxel,
+        const Vec3& rest_point) const;
+
 private:
     struct Frame {
         std::array<ParticleId, 3> others{};
